@@ -89,6 +89,8 @@ type Conn struct {
 	ws      *websocket.Conn
 	log     *slog.Logger
 
+	observe func(Direction, []byte)
+
 	callTimeout time.Duration
 	// idleTimeout doubles as the heartbeat watchdog: it is applied as a read
 	// deadline and refreshed by every inbound OCPP message, so a station that
@@ -120,6 +122,29 @@ type Options struct {
 	// IdleTimeout drops a connection with no inbound traffic for this long.
 	IdleTimeout time.Duration
 	Log         *slog.Logger
+	// Observe, when set, is called with every inbound message exactly as it
+	// was read, before parsing, and every outbound message exactly as it is
+	// about to be written. It runs on the read or write goroutine, so it must
+	// be fast and must not retain data without copying it.
+	Observe func(dir Direction, data []byte)
+}
+
+// Direction says which way an observed frame travelled, from this end's
+// point of view.
+type Direction int
+
+// The directions an observed frame can travel.
+const (
+	Inbound Direction = iota
+	Outbound
+)
+
+// String names the direction for logs.
+func (d Direction) String() string {
+	if d == Inbound {
+		return "inbound"
+	}
+	return "outbound"
 }
 
 // New wraps an already-handshaken WebSocket connection.
@@ -138,6 +163,7 @@ func New(ws *websocket.Conn, opts Options) *Conn {
 		version:     opts.Version,
 		ws:          ws,
 		log:         opts.Log,
+		observe:     opts.Observe,
 		callTimeout: opts.CallTimeout,
 		idleTimeout: opts.IdleTimeout,
 		send:        make(chan []byte, sendBuffer),
@@ -268,6 +294,9 @@ func (c *Conn) readLoop() string {
 			return closeReason(err)
 		}
 		c.refreshDeadline()
+		if c.observe != nil {
+			c.observe(Inbound, data)
+		}
 
 		f, errID, rpcErr := ParseFrame(data)
 		if rpcErr != nil {
@@ -381,6 +410,9 @@ func (c *Conn) writeLoop() {
 			return
 
 		case data := <-c.send:
+			if c.observe != nil {
+				c.observe(Outbound, data)
+			}
 			_ = c.ws.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.ws.WriteMessage(websocket.TextMessage, data); err != nil {
 				c.log.Debug("write failed", "charge_point", c.id, "error", err)

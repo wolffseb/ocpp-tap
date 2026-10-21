@@ -19,7 +19,8 @@ Copied files (source path -> path here):
   internal/ocpp/ocppj/conn_test.go       -> internal/ocpp/ocppj/conn_test.go
 
 Modifications: import paths rewritten from github.com/wolffseb/cli-cpms to
-github.com/wolffseb/ocpp-tap; see git history for later changes.
+github.com/wolffseb/ocpp-tap; ocppj.Options.Observe (raw-frame hook)
+added for the test harness; see git history for later changes.
 
 The test harness also runs (but does not copy) the `cpms` binary built from
 the same repository at the commit pinned in the Makefile.
