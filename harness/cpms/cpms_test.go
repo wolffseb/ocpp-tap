@@ -37,21 +37,24 @@ type charger struct {
 	ws *websocket.Conn
 }
 
-func dial(t *testing.T, base, id string, subprotocols ...string) (*charger, *http.Response, error) {
+// dial returns the HTTP status of a refused handshake (0 if there was none).
+func dial(t *testing.T, base, id string, subprotocols ...string) (*charger, int, error) {
 	t.Helper()
 	if subprotocols == nil {
 		subprotocols = []string{"ocpp1.6"}
 	}
 	d := websocket.Dialer{Subprotocols: subprotocols, HandshakeTimeout: 2 * time.Second}
 	ws, resp, err := d.Dial(base+"/ocpp/"+id, nil)
-	if resp != nil && resp.Body != nil {
+	status := 0
+	if resp != nil {
+		status = resp.StatusCode
 		_ = resp.Body.Close()
 	}
 	if err != nil {
-		return nil, resp, err
+		return nil, status, err
 	}
 	t.Cleanup(func() { _ = ws.Close() })
-	return &charger{t: t, ws: ws}, resp, nil
+	return &charger{t: t, ws: ws}, status, nil
 }
 
 func mustDial(t *testing.T, base, id string) *charger {
@@ -297,12 +300,12 @@ func TestRefusesWithoutOCPP16(t *testing.T) {
 	t.Parallel()
 
 	_, base := start(t, Options{})
-	_, resp, err := dial(t, base, "CP1", "ocpp2.0.1")
+	_, status, err := dial(t, base, "CP1", "ocpp2.0.1")
 	if err == nil {
 		t.Fatal("handshake without ocpp1.6 succeeded")
 	}
-	if resp == nil || resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("resp = %v, want 400", resp)
+	if status != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", status)
 	}
 }
 
@@ -379,12 +382,12 @@ func TestModeDown(t *testing.T) {
 		t.Fatalf("live connection survived ModeDown: %v", err)
 	}
 	// ...and new ones refused.
-	_, resp, err := dial(t, base, "CP2")
+	_, status, err := dial(t, base, "CP2")
 	if err == nil {
 		t.Fatal("dial succeeded while down")
 	}
-	if resp == nil || resp.StatusCode != http.StatusServiceUnavailable {
-		t.Errorf("resp = %v, want 503", resp)
+	if status != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", status)
 	}
 
 	// Back up again.
@@ -392,6 +395,16 @@ func TestModeDown(t *testing.T) {
 	c := mustDial(t, base, "CP2")
 	c.send(`[2,"1","Heartbeat",{}]`)
 	c.mustRead()
+}
+
+func TestChargerID(t *testing.T) {
+	t.Parallel()
+
+	for in, want := range map[string]string{"/ocpp/CP1": "CP1", "/CP1/": "CP1", "/a/b/CP-2": "CP-2", "/": "", "": ""} {
+		if got := chargerID(in); got != want {
+			t.Errorf("chargerID(%q) = %q, want %q", in, got, want)
+		}
+	}
 }
 
 func TestParseMode(t *testing.T) {
