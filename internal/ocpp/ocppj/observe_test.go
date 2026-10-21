@@ -106,6 +106,14 @@ func waitFrames(t *testing.T, rec *recorder, n int) []observed {
 	return got
 }
 
+func byDirection(frames []observed) map[Direction]observed {
+	out := map[Direction]observed{}
+	for _, f := range frames {
+		out[f.dir] = f
+	}
+	return out
+}
+
 func assertFrame(t *testing.T, got observed, dir Direction, want []byte) {
 	t.Helper()
 	if got.dir != dir {
@@ -159,9 +167,11 @@ func TestObserveOutboundCallAndInboundResult(t *testing.T) {
 		t.Fatalf("Call: %v", err)
 	}
 
-	got := waitFrames(t, rec, 2)
-	assertFrame(t, got[0], Outbound, call)
-	assertFrame(t, got[1], Inbound, result)
+	// The read and write goroutines observe independently, so only the
+	// order within one direction is defined.
+	got := byDirection(waitFrames(t, rec, 2))
+	assertFrame(t, got[Outbound], Outbound, call)
+	assertFrame(t, got[Inbound], Inbound, result)
 }
 
 // A frame the parser rejects is still observed: the recorder must see what

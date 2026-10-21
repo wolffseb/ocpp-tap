@@ -123,8 +123,10 @@ type Options struct {
 	IdleTimeout time.Duration
 	Log         *slog.Logger
 	// Observe, when set, is called with every inbound message exactly as it
-	// was read, before parsing, and every outbound message exactly as it is
-	// about to be written. It runs on the read or write goroutine, so it must
+	// was read, before parsing, and every outbound message exactly as it was
+	// written, after the write succeeded; a frame that never reached the
+	// socket is not observed. Inbound and outbound calls come from different
+	// goroutines, so their relative order is not defined. It runs on the read or write goroutine, so it must
 	// be fast and must not retain data without copying it.
 	Observe func(dir Direction, data []byte)
 }
@@ -410,14 +412,14 @@ func (c *Conn) writeLoop() {
 			return
 
 		case data := <-c.send:
-			if c.observe != nil {
-				c.observe(Outbound, data)
-			}
 			_ = c.ws.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.ws.WriteMessage(websocket.TextMessage, data); err != nil {
 				c.log.Debug("write failed", "charge_point", c.id, "error", err)
 				c.Close()
 				return
+			}
+			if c.observe != nil {
+				c.observe(Outbound, data)
 			}
 
 		case <-ticker.C:
