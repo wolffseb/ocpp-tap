@@ -31,3 +31,8 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Build output and the harness's fetched dependencies
+bin/
+.cache/
+e2e-artifacts/

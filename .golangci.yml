@@ -1,0 +1,51 @@
+version: "2"
+
+linters:
+  # The standard set (errcheck, govet, ineffassign, staticcheck, unused) plus
+  # a few that catch mistakes most likely to reach an operator.
+  default: standard
+  enable:
+    - bodyclose
+    - depguard
+    - misspell
+    - revive
+  settings:
+    depguard:
+      rules:
+        # Principle 1 / SP1: the forwarder depends on nothing above it. The
+        # tap, API and UI read a copy of the traffic; the arrow never points
+        # back. CI fails on violation.
+        forwarder-isolation:
+          files:
+            - "**/internal/forwarder/**"
+          deny:
+            - pkg: github.com/wolffseb/ocpp-tap/internal/tap
+              desc: the forwarder must not depend on the tap
+            - pkg: github.com/wolffseb/ocpp-tap/internal/api
+              desc: the forwarder must not depend on the API
+            - pkg: github.com/wolffseb/ocpp-tap/internal/ui
+              desc: the forwarder must not depend on the UI
+            - pkg: github.com/wolffseb/ocpp-tap/harness
+              desc: the forwarder must not depend on the test harness
+    errcheck:
+      # Writing to stdout/stderr is best-effort.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    revive:
+      rules:
+        - name: exported
+          arguments: [checkPrivateReceivers]
+        - name: package-comments
+        - name: indent-error-flow
+        - name: errorf
+  exclusions:
+    rules:
+      # Test helpers legitimately ignore errors on cleanup paths.
+      - path: _test\.go
+        linters: [errcheck]
+
+formatters:
+  enable:
+    - gofmt
