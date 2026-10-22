@@ -84,8 +84,13 @@ func TestFailClosedUpstreamUnreachable(t *testing.T) {
 	if _, status, err := dialCharger(t, r.proxyURL, id, password(id)); err == nil || status != http.StatusBadGateway {
 		t.Fatalf("err %v status %d, want a refused handshake (502)", err, status)
 	}
-	if !strings.Contains(r.proxy.out.String(), "upstream unavailable") {
-		t.Errorf("octap did not log the refusal:\n%s", r.proxy.out.String())
+	// octap's stderr arrives through a pipe, so the line may trail the 502.
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(r.proxy.out.String(), "upstream unavailable") {
+		if time.Now().After(deadline) {
+			t.Fatalf("octap did not log the refusal:\n%s", r.proxy.out.String())
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

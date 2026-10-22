@@ -20,12 +20,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -130,9 +130,10 @@ func startProxy(t *testing.T, upstream string, ids []string) *proxy {
 		t.Fatal(err)
 	}
 
-	addr := freeAddr(t)
-	p := &proxy{url: "ws://" + addr, out: &syncBuffer{}}
-	p.cmd = exec.Command(proxyBin, "run", "-config", cfgPath, "-listen", addr, "-log-level", "debug")
+	// octap picks its own port and logs it; reading it back avoids the race
+	// of choosing a free port here and handing it over.
+	p := &proxy{out: &syncBuffer{}}
+	p.cmd = exec.Command(proxyBin, "run", "-config", cfgPath, "-listen", "127.0.0.1:0", "-log-level", "debug")
 	p.cmd.Stdout, p.cmd.Stderr = p.out, p.out
 	if err := p.cmd.Start(); err != nil {
 		t.Fatalf("start octap: %v", err)
@@ -146,27 +147,20 @@ func startProxy(t *testing.T, upstream string, ids []string) *proxy {
 	})
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
-		if err == nil {
-			_ = conn.Close()
+		if m := listenLine.FindStringSubmatch(p.out.String()); m != nil {
+			p.url = m[1]
 			return p
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("octap not listening on %s: %v\n%s", addr, err, p.out.String())
+			t.Fatalf("octap did not report its listen address:\n%s", p.out.String())
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
-func freeAddr(t *testing.T) string {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-	return l.Addr().String()
-}
+// listenLine matches octap's startup log line, which it writes once the
+// listener is bound.
+var listenLine = regexp.MustCompile(`msg="octap forwarding" .*listen=(ws://\S+)`)
 
 // simulator is one `cpms simulate charger` process.
 type simulator struct {
