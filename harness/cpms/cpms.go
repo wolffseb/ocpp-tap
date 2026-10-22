@@ -121,6 +121,8 @@ type Server struct {
 	mode  Mode
 	conns map[string]*ocppj.Conn
 	calls map[string]map[string]int
+	// handshakes counts accepted connections per charger.
+	handshakes map[string]int
 
 	txSeq atomic.Int64
 
@@ -133,13 +135,14 @@ func New(opts Options) *Server {
 	opts.applyDefaults()
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
-		opts:   opts,
-		log:    opts.Log,
-		ctx:    ctx,
-		cancel: cancel,
-		mode:   opts.Mode,
-		conns:  map[string]*ocppj.Conn{},
-		calls:  map[string]map[string]int{},
+		opts:       opts,
+		log:        opts.Log,
+		ctx:        ctx,
+		cancel:     cancel,
+		mode:       opts.Mode,
+		conns:      map[string]*ocppj.Conn{},
+		calls:      map[string]map[string]int{},
+		handshakes: map[string]int{},
 	}
 }
 
@@ -242,6 +245,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		old.Close()
 	}
 	s.conns[id] = conn
+	s.handshakes[id]++
 	s.mu.Unlock()
 
 	s.log.Info("charger connected", "charge_point", id, "path", r.URL.Path, "remote", r.RemoteAddr)
@@ -281,6 +285,13 @@ func (s *Server) Connected(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.conns[id] != nil
+}
+
+// Connections is how many times the charger has connected.
+func (s *Server) Connections(id string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.handshakes[id]
 }
 
 // CallCount is how many CALLs of action the charger has sent.

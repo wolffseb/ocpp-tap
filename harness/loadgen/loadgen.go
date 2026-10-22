@@ -12,9 +12,11 @@ package loadgen
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -40,7 +42,10 @@ type Options struct {
 	Interval time.Duration
 	// CallTimeout bounds each call.
 	CallTimeout time.Duration
-	Log         *slog.Logger
+	// Password, when set, gives each charger a Basic Auth password; the
+	// username is the charger ID.
+	Password func(id string) string
+	Log      *slog.Logger
 }
 
 func (o *Options) applyDefaults() {
@@ -143,7 +148,11 @@ func (f *Fleet) runCharger(ctx context.Context, id string, delay time.Duration) 
 	}
 
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second, Subprotocols: []string{ocpp.Version16.Subprotocol()}}
-	ws, resp, err := dialer.DialContext(ctx, strings.TrimRight(f.opts.URL, "/")+"/ocpp/"+id, nil)
+	header := http.Header{}
+	if f.opts.Password != nil {
+		header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(id+":"+f.opts.Password(id))))
+	}
+	ws, resp, err := dialer.DialContext(ctx, strings.TrimRight(f.opts.URL, "/")+"/ocpp/"+id, header)
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
