@@ -1,11 +1,11 @@
 # ADR-0001: Architecture — forwarder/tap split, fail closed, tap copies, trial config
 
-- Status: **Proposed**
+- Status: **Accepted** (2026-10-22, Sebastian: merged in wolffseb/ocpp-tap#1, "Let's do SP1")
 - Date: 2026-10-21
 - Deciders: Sebastian (human gate "Architecture ADR", before SP1)
 - Related: [PRD](../PRD.md) § Principles, § Architecture, SP1, SP2, SP4
 
-SP1 does not start until this ADR is Accepted.
+This ADR gated SP1.
 
 ## Context
 
