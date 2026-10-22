@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -96,5 +97,31 @@ func TestChargerID(t *testing.T) {
 	t.Parallel()
 	if got := ChargerID("LOAD", 7); got != "LOAD-0007" {
 		t.Errorf("ChargerID = %q", got)
+	}
+}
+
+func TestFleetSendsPassword(t *testing.T) {
+	t.Parallel()
+
+	got := make(chan string, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got <- r.Header.Get("Authorization")
+		http.Error(w, "no", http.StatusUnauthorized)
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	fleet := Start(ctx, Options{
+		URL: "ws" + strings.TrimPrefix(srv.URL, "http"), N: 1, Messages: 1, Log: quiet(),
+		Password: func(id string) string { return "pw-" + id },
+	})
+	res := fleet.Wait()
+	fleet.Close()
+	if len(res.Errors) != 1 {
+		t.Errorf("errors = %v, want the 401", res.Errors)
+	}
+	if a := <-got; a != "Basic TE9BRC0wMDAwOnB3LUxPQUQtMDAwMA==" { // LOAD-0000:pw-LOAD-0000
+		t.Errorf("Authorization = %q", a)
 	}
 }
