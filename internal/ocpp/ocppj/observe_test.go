@@ -191,3 +191,63 @@ func TestObserveMalformedInbound(t *testing.T) {
 	assertFrame(t, got[0], Inbound, bad)
 	assertFrame(t, got[1], Outbound, callErr)
 }
+
+// When Call returns, its own CALL has already been observed, even if the
+// peer answered before the writer goroutine got to the hook. Recorders rely
+// on this to know their log is complete.
+func TestCallReturnsAfterItsFrameWasObserved(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var outbound int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.Close()
+		for {
+			_, data, err := ws.ReadMessage()
+			if err != nil {
+				return
+			}
+			f, _, _ := ParseFrame(data)
+			_ = ws.WriteMessage(websocket.TextMessage, []byte(`[3,"`+f.ID+`",{}]`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	ws, resp, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn := New(ws, Options{
+		ID: "CP", Version: ocpp.Version16, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Observe: func(dir Direction, _ []byte) {
+			if dir == Outbound {
+				// A slow hook: the answer arrives while we are still here.
+				time.Sleep(50 * time.Millisecond)
+				mu.Lock()
+				outbound++
+				mu.Unlock()
+			}
+		},
+	})
+	go conn.Run(context.Background(), nopHandler{})
+	t.Cleanup(conn.Close)
+
+	for i := 1; i <= 3; i++ {
+		if _, err := conn.Call(context.Background(), "Heartbeat", struct{}{}); err != nil {
+			t.Fatal(err)
+		}
+		mu.Lock()
+		got := outbound
+		mu.Unlock()
+		if got != i {
+			t.Fatalf("after Call %d returned, %d outbound frames observed", i, got)
+		}
+	}
+}
