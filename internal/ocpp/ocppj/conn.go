@@ -98,7 +98,7 @@ type Conn struct {
 	// WebSocket pongs pointedly do not refresh it; see readLoop.
 	idleTimeout time.Duration
 
-	send  chan []byte
+	send  chan outbound
 	calls chan Frame
 
 	pendingMu sync.Mutex
@@ -168,7 +168,7 @@ func New(ws *websocket.Conn, opts Options) *Conn {
 		observe:     opts.Observe,
 		callTimeout: opts.CallTimeout,
 		idleTimeout: opts.IdleTimeout,
-		send:        make(chan []byte, sendBuffer),
+		send:        make(chan outbound, sendBuffer),
 		calls:       make(chan Frame, callBuffer),
 		pending:     make(map[string]chan callResult),
 		done:        make(chan struct{}),
@@ -204,8 +204,9 @@ func (c *Conn) Call(ctx context.Context, action string, payload any) (json.RawMe
 	c.pendingMu.Unlock()
 	defer c.forget(id)
 
+	written := make(chan struct{})
 	select {
-	case c.send <- data:
+	case c.send <- outbound{data: data, written: written}:
 	case <-c.done:
 		return nil, ErrConnClosed
 	case <-ctx.Done():
@@ -217,6 +218,13 @@ func (c *Conn) Call(ctx context.Context, action string, payload any) (json.RawMe
 
 	select {
 	case res := <-ch:
+		// The peer can answer before the writer has run the Observe hook
+		// for our CALL. Wait for it, so that when Call returns the frame
+		// is in any recorder's log.
+		select {
+		case <-written:
+		case <-c.done:
+		}
 		if res.rpcErr != nil {
 			return nil, res.rpcErr
 		}
@@ -392,9 +400,16 @@ func (c *Conn) sendCallError(id string, rpcErr *ocpp.RPCError) {
 // already gone.
 func (c *Conn) enqueue(data []byte) {
 	select {
-	case c.send <- data:
+	case c.send <- outbound{data: data}:
 	case <-c.done:
 	}
+}
+
+// outbound is a frame queued for the writer. written, if set, is closed once
+// the frame has been written and observed.
+type outbound struct {
+	data    []byte
+	written chan struct{}
 }
 
 func (c *Conn) writeLoop() {
@@ -411,15 +426,18 @@ func (c *Conn) writeLoop() {
 		case <-c.done:
 			return
 
-		case data := <-c.send:
+		case out := <-c.send:
 			_ = c.ws.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := c.ws.WriteMessage(websocket.TextMessage, data); err != nil {
+			if err := c.ws.WriteMessage(websocket.TextMessage, out.data); err != nil {
 				c.log.Debug("write failed", "charge_point", c.id, "error", err)
 				c.Close()
 				return
 			}
 			if c.observe != nil {
-				c.observe(Outbound, data)
+				c.observe(Outbound, out.data)
+			}
+			if out.written != nil {
+				close(out.written)
 			}
 
 		case <-ticker.C:
