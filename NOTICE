@@ -1,0 +1,49 @@
+ocpp-tap
+========
+
+This repository contains code copied from another project. The copies have
+been modified since and are maintained here independently.
+
+Source:  https://github.com/wolffseb/headless-csms
+Commit:  603c2d112c736ff98e44844a57fb63dbda7096e3
+License: MIT (reproduced below)
+
+Copied files (source path -> path here):
+
+  internal/ocpp/ocpp.go                  -> internal/ocpp/ocpp.go
+  internal/ocpp/chargepoint.go (excerpt: ErrTimeout, ErrNotConnected)
+                                         -> internal/ocpp/errors.go
+  internal/ocpp/ocppj/frame.go           -> internal/ocpp/ocppj/frame.go
+  internal/ocpp/ocppj/frame_test.go      -> internal/ocpp/ocppj/frame_test.go
+  internal/ocpp/ocppj/conn.go            -> internal/ocpp/ocppj/conn.go
+  internal/ocpp/ocppj/conn_test.go       -> internal/ocpp/ocppj/conn_test.go
+
+Modifications: import paths rewritten from github.com/wolffseb/cli-cpms to
+github.com/wolffseb/ocpp-tap; ocppj.Options.Observe (raw-frame hook)
+added for the test harness; see git history for later changes.
+
+The test harness also runs (but does not copy) the `cpms` binary built from
+the same repository at the commit pinned in the Makefile.
+
+--------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2026 Sebastian Wolff
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

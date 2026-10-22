@@ -1,5 +1,9 @@
 version: "2"
 
+run:
+  # Lint the e2e suite too; it is behind a build tag.
+  build-tags: [e2e]
+
 linters:
   # The standard set (errcheck, govet, ineffassign, staticcheck, unused) plus
   # a few that catch mistakes most likely to reach an operator.
