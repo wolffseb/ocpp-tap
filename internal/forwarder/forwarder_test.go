@@ -51,6 +51,8 @@ type upstream struct {
 	received    chan message
 	toSend      chan message
 	connections chan *websocket.Conn
+	// ended gets a value each time an upstream connection's read loop ends.
+	ended chan struct{}
 }
 
 func newUpstream(t *testing.T, configure func(*upstream)) *upstream {
@@ -59,6 +61,7 @@ func newUpstream(t *testing.T, configure func(*upstream)) *upstream {
 		received:    make(chan message, 1000),
 		toSend:      make(chan message, 1000),
 		connections: make(chan *websocket.Conn, 10),
+		ended:       make(chan struct{}, 10),
 	}
 	if configure != nil {
 		configure(u)
@@ -87,6 +90,7 @@ func newUpstream(t *testing.T, configure func(*upstream)) *upstream {
 			return
 		}
 		u.connections <- ws
+		defer func() { u.ended <- struct{}{} }()
 		if u.silent {
 			// No read loop means no pong is ever sent back.
 			<-r.Context().Done()
@@ -601,17 +605,13 @@ func TestChargerGoneClosesUpstream(t *testing.T) {
 	up := newUpstream(t, nil)
 	f, base, _ := start(t, Options{Chargers: chargers{"CP1": cp(up, "CP1", "")}})
 	ws := mustDial(t, base, "/ocpp/CP1", dialOpts{})
-	upConn := <-up.connections
+	<-up.connections
 	_ = ws.Close()
 
-	_ = upConn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	for {
-		if _, _, err := upConn.ReadMessage(); err != nil {
-			if isTimeout(err) {
-				t.Fatal("upstream still connected after the charger left")
-			}
-			break
-		}
+	select {
+	case <-up.ended:
+	case <-time.After(2 * time.Second):
+		t.Fatal("upstream still connected after the charger left")
 	}
 	waitFor(t, func() bool { return f.Active() == 0 })
 }
