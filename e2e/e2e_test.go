@@ -559,7 +559,7 @@ func TestFrameCheckCatchesAlteration(t *testing.T) {
 	t.Logf("altering proxy caught: %d diffs, first: %v", len(diffs), diffs[0])
 }
 
-// mutatingProxy forwards like the placeholder but appends a space to every
+// mutatingProxy forwards like a passthrough but appends a space to every
 // charger-to-CPMS frame: still valid JSON, no longer byte-identical.
 func mutatingProxy(upstream string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

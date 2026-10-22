@@ -7,7 +7,7 @@
 // not expose its frames, so this is where they are captured. Compare the
 // result with the harness CPMS's log using frames.Compare.
 //
-// It is deliberately separate from the placeholder passthrough: the
+// It is deliberately separate from the forwarder it measures: the
 // recorder is part of the measuring instrument, the proxy is the thing
 // measured, and they must not share code.
 package recorder
