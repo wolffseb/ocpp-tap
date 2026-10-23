@@ -26,7 +26,7 @@ Every event has these fields, always present:
 | `type` | The event type, e.g. `"connector.status"`. |
 | `charger_id` | The charge point identity: the last segment of the URL path the charger dialled. |
 | `connector_id` | OCPP connector id. `0` is the charge point as a whole (OCPP's convention); charger-level events (`charger.*`) always carry `0`. |
-| `timestamp` | The time the charger put in the frame, in UTC. `null` when the frame has none: always for `charger.*`, and for a `connector.status` whose StatusNotification left it out. |
+| `timestamp` | The time the charger put in the frame, in UTC. `null` when the frame has none: always for `charger.*`, and for a `connector.status` whose StatusNotification left it out. A charger time with an offset is converted; one with no zone is read as UTC (rule T1, below). |
 | `received_at` | When octap read the frame (for `charger.connected` and `charger.disconnected`: when it saw the connection change), in UTC, up to nanosecond precision. |
 | `data` | The type-specific payload, below. |
 
@@ -48,7 +48,7 @@ Field names are the OCPP fields in `snake_case`. Enumerated values are exactly t
 | `serial_number` | `chargePointSerialNumber`, or `null` |
 | `firmware_version` | `firmwareVersion`, or `null` |
 | `registration_status` | the answer's `status`: `Accepted`, `Pending`, `Rejected` |
-| `heartbeat_interval_s` | the answer's `interval`, seconds |
+| `interval_s` | the answer's `interval`, seconds. With `Accepted` it is the heartbeat interval. With `Pending` or `Rejected` it is the minimum wait before the charger's next BootNotification, and `0` means the charger chooses (OCPP 1.6 §4.2) |
 
 **`connector.status`**: one StatusNotification.
 
@@ -69,15 +69,15 @@ Field names are the OCPP fields in `snake_case`. Enumerated values are exactly t
 | `transaction_id` | the request's `transactionId` | |
 | `context` | the ReadingContext of the values used (`Sample.Periodic`, `Transaction.Begin`, …) | |
 
-Which sampled values are used:
+Which sampled values are used. The rules are applied **per measurand** (energy, power, current, SoC), to the `sampledValue` array of one MeterValue element, and are tested by [`conformance.json`](conformance.json) through `events.SelectMeterSample`.
 
-- Only `Raw` values (`format` absent or `Raw`); `SignedData` is skipped.
-- OCPP defaults apply: a sampled value without `measurand` is `Energy.Active.Import.Register`, without `unit` it is Wh (energy) or the measurand's base unit, without `location` it is `Outlet`.
-- Energy, power and current come from `Outlet` values. SoC comes from any location (usually `EV`).
-- Units are normalised: kWh → Wh, kW → W. Values are numbers, not strings.
-- Phases: if an unphased value (no `phase`) is present, it is used. Otherwise energy and power are the **sum** over `L1`, `L2`, `L3`, and current is the **maximum** over `L1`, `L2`, `L3`. `L1-N`, `L2-N`, `L3-N` count as `L1`, `L2`, `L3`; `N` and line-to-line phases are ignored.
-- `context` is the context of the first value used; `null` if it has none (OCPP then means `Sample.Periodic`).
-- A field is `null` when the element carries no usable value for it. An element with none of the four measurands makes no event.
+- **M1** Only `Raw` values (`format` absent or `Raw`) are used; `SignedData` is skipped.
+- **M2** OCPP defaults apply: no `measurand` means `Energy.Active.Import.Register`, no `location` means `Outlet`, no `unit` means the measurand's base unit (Wh, W, A, Percent). Units are normalised: kWh to Wh, kW to W. A value that is not a finite number, or whose unit the measurand does not take (e.g. `kvar` for power), is skipped as if absent. Values are numbers, not strings.
+- **M3** Location. For `connector_id` 0, the main meter (OCPP 1.6 §4.7, §3.16.3): use `Inlet` values; if the measurand has none, use `Outlet` values. For `connector_id` above 0: use `Outlet` values only. When one element carries both for a measurand, the preferred one wins and the other is ignored. Other locations (`Body`, `Cable`, `EV`) are ignored for energy, power and current. SoC takes the first value of any location (usually `EV`) and has no phases.
+- **M4** Phases. If an unphased value (no `phase`) remains, it is the value and phased values are ignored. Otherwise take, for each of `L1`, `L2`, `L3`, its `Lx` value, or its `Lx-N` value only when there is no `Lx` (so `L1` and `L1-N` are never both counted). Energy and power are the **sum** of the phases found, current the **maximum**. Phases that are absent are skipped: a charger that reports only `L1` and `L2` gets the sum of those two, as is. `N` and line-to-line phases (`L1-L2`, ...) are ignored.
+- **M5** Where several values qualify for the same slot (unphased, or the same phase), the **first in `sampledValue` array order** wins; later ones are ignored.
+- **M6** `context` is the context of the **first used value in `sampledValue` array order**, over all four measurands. Values that were skipped, shadowed by an unphased value or lost to a duplicate do not count. It is `null` if that value has no `context`, or one that is not a ReadingContext (OCPP then means `Sample.Periodic`).
+- **M7** A field is `null` when the element carries no usable value for it. An element with none of the four measurands makes no event.
 
 **`transaction.started`**: made when the CPMS answers a StartTransaction; `timestamp` is the request's.
 
@@ -99,6 +99,10 @@ Which sampled values are used:
 | `id_tag` | `idTag`, or `null` (personal data, see below) |
 
 StopTransaction has no connector id, so `connector_id` is the one from the matching `transaction.started`. When octap did not see the start (it was restarted mid-transaction, or the event was dropped), `connector_id` is `null`. This is the only event where it can be.
+
+## Timestamps in frames
+
+- **T1** OCPP 1.6 §3.14 allows any ISO 8601 time and recommends UTC. A frame time with a `Z` or an offset is converted to UTC. A time **with no zone designator** (`2026-10-23T09:15:00`) is read as UTC, the zone the spec recommends, so the event is kept and `timestamp` is never `null` for `meter.sample` and `transaction.*`. A charger that sends local time without a zone therefore reports a shifted `timestamp`; `received_at` is the reference for that. A value that is not an ISO 8601 date and time makes no event. Tested by `events.ParseFrameTime`.
 
 ## Null rules
 

@@ -29,7 +29,7 @@
       "minimum": 0
     },
     "timestamp": {
-      "description": "The time the charger put in the frame, in UTC. null when the frame carries none.",
+      "description": "The time the charger put in the frame, in UTC with a Z suffix. A time with an offset is converted; a time with no zone designator is read as UTC (README rule T1). null when the frame carries none.",
       "type": ["string", "null"],
       "format": "date-time",
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"

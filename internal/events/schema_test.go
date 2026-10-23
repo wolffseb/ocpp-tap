@@ -58,7 +58,7 @@ func full() map[Type]Event {
 			SerialNumber:       ptr("KP-2026-000123"),
 			FirmwareVersion:    ptr("1.42.0"),
 			RegistrationStatus: RegistrationAccepted,
-			HeartbeatIntervalS: 300,
+			IntervalS:          300,
 		}),
 		NewConnectorStatus("CP1", 1, &frameTS, received, ConnectorStatus{
 			Status:          StatusSuspendedEV,
@@ -113,7 +113,7 @@ func minimal() map[Type]Event {
 		NewChargerConnected("CP1", received, ChargerConnected{Subprotocol: "ocpp1.6"}),
 		NewChargerDisconnected("CP1", received, ChargerDisconnected{Reason: "charger left"}),
 		NewChargerBooted("CP1", received, ChargerBooted{
-			Vendor: "V", Model: "M", RegistrationStatus: RegistrationPending, HeartbeatIntervalS: 0,
+			Vendor: "V", Model: "M", RegistrationStatus: RegistrationPending, IntervalS: 60,
 		}),
 		NewConnectorStatus("CP1", 0, nil, received, ConnectorStatus{Status: StatusAvailable, ErrorCode: ErrorNoError}),
 		NewMeterSample("CP1", 2, frameTS, received, MeterSample{}),
@@ -500,6 +500,8 @@ func TestSchemasRejectWrongDocuments(t *testing.T) {
 		{"missing timestamp", func(m map[string]any) { delete(m, "timestamp") }},
 		{"missing received_at", func(m map[string]any) { delete(m, "received_at") }},
 		{"received_at not UTC", func(m map[string]any) { m["received_at"] = "2026-10-23T11:15:02.123+02:00" }},
+		{"timestamp not UTC", func(m map[string]any) { m["timestamp"] = "2026-10-23T11:15:00+02:00" }},
+		{"timestamp without zone", func(m map[string]any) { m["timestamp"] = "2026-10-23T09:15:00" }},
 		{"received_at not a date-time", func(m map[string]any) { m["received_at"] = "yesterday" }},
 		{"schema_version 2", func(m map[string]any) { m["schema_version"] = "2" }},
 		{"id not a UUIDv7", func(m map[string]any) { m["id"] = "4f3c2a8e-1b2d-4c5e-8f90-123456789abc" }},
@@ -524,8 +526,8 @@ func TestSchemasRejectWrongDocuments(t *testing.T) {
 			{"unknown registration_status", func(m map[string]any) { data(m)["registration_status"] = "Unknown" }},
 			{"missing vendor", func(m map[string]any) { delete(data(m), "vendor") }},
 			{"missing serial_number", func(m map[string]any) { delete(data(m), "serial_number") }},
-			{"negative heartbeat", func(m map[string]any) { data(m)["heartbeat_interval_s"] = -1 }},
-			{"fractional heartbeat", func(m map[string]any) { data(m)["heartbeat_interval_s"] = 1.5 }},
+			{"negative interval", func(m map[string]any) { data(m)["interval_s"] = -1 }},
+			{"fractional interval", func(m map[string]any) { data(m)["interval_s"] = 1.5 }},
 		},
 		TypeConnectorStatus: {
 			{"wrong type", func(m map[string]any) { m["type"] = "meter.sample" }},

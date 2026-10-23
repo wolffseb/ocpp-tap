@@ -12,6 +12,6 @@
     "serial_number": "KP-2026-000123",
     "firmware_version": "1.42.0",
     "registration_status": "Accepted",
-    "heartbeat_interval_s": 300
+    "interval_s": 300
   }
 }

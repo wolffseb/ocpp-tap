@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "meter.sample, v1",
-  "description": "One MeterValue element of a MeterValues request, with units normalised to Wh, W, A and percent. timestamp is the element's timestamp. README.md says which sampled values are used.",
+  "description": "One MeterValue element of a MeterValues request, with units normalised to Wh, W, A and percent. timestamp is the element's timestamp. README.md rules M1-M7 say which sampled values are used; conformance.json pins them.",
   "$ref": "envelope.schema.json",
   "properties": {
     "type": { "const": "meter.sample" },
@@ -18,23 +18,23 @@
           "type": ["integer", "null"]
         },
         "energy_wh": {
-          "description": "Energy.Active.Import.Register, in Wh, or null.",
+          "description": "Energy.Active.Import.Register, in Wh, or null. Phases are summed (rule M4).",
           "type": ["number", "null"]
         },
         "power_w": {
-          "description": "Power.Active.Import, in W, or null.",
+          "description": "Power.Active.Import, in W, or null. Phases are summed (rule M4).",
           "type": ["number", "null"]
         },
         "current_a": {
-          "description": "Current.Import, in A, or null.",
+          "description": "Current.Import, in A, or null. The maximum over phases (rule M4).",
           "type": ["number", "null"]
         },
         "soc_percent": {
-          "description": "SoC, in percent, or null.",
+          "description": "SoC, in percent, or null. The first SoC value, any location (rules M3, M5).",
           "type": ["number", "null"]
         },
         "context": {
-          "description": "OCPP 1.6 ReadingContext of the values used, or null when the charger left it out (OCPP's default is Sample.Periodic).",
+          "description": "OCPP 1.6 ReadingContext of the values used, or null when the first used value has none or an unknown one (rule M6; OCPP's default is Sample.Periodic).",
           "enum": ["Interruption.Begin", "Interruption.End", "Sample.Clock", "Sample.Periodic", "Transaction.Begin", "Transaction.End", "Trigger", "Other", null]
         }
       },

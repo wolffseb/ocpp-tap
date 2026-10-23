@@ -33,13 +33,13 @@
           "description": "BootNotification.conf status (OCPP 1.6 RegistrationStatus).",
           "enum": ["Accepted", "Pending", "Rejected"]
         },
-        "heartbeat_interval_s": {
-          "description": "BootNotification.conf interval, in seconds.",
+        "interval_s": {
+          "description": "BootNotification.conf interval, in seconds. With registration_status Accepted it is the heartbeat interval. With Pending or Rejected it is the minimum wait before the charger's next BootNotification, and 0 lets the charger choose (OCPP 1.6 section 4.2).",
           "type": "integer",
           "minimum": 0
         }
       },
-      "required": ["vendor", "model", "serial_number", "firmware_version", "registration_status", "heartbeat_interval_s"]
+      "required": ["vendor", "model", "serial_number", "firmware_version", "registration_status", "interval_s"]
     }
   }
 }

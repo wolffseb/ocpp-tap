@@ -42,8 +42,8 @@ type Event struct {
 	// ConnectorID is the OCPP connector id, 0 for the charge point as a
 	// whole. nil only for a transaction.stopped whose connector is unknown.
 	ConnectorID *int
-	// Timestamp is the time the charger put in the frame; nil when the frame
-	// carries none.
+	// Timestamp is the time the charger put in the frame (ParseFrameTime: a
+	// time without a zone is UTC); nil when the frame carries none.
 	Timestamp *time.Time
 	// ReceivedAt is when octap read the frame.
 	ReceivedAt time.Time
@@ -145,7 +145,11 @@ type ChargerBooted struct {
 	SerialNumber       *string            `json:"serial_number"`
 	FirmwareVersion    *string            `json:"firmware_version"`
 	RegistrationStatus RegistrationStatus `json:"registration_status"`
-	HeartbeatIntervalS int                `json:"heartbeat_interval_s"`
+	// IntervalS is BootNotification.conf's interval, in seconds. With
+	// RegistrationAccepted it is the heartbeat interval; otherwise it is the
+	// minimum wait before the charger's next BootNotification, and 0 lets the
+	// charger choose (OCPP 1.6 section 4.2).
+	IntervalS int `json:"interval_s"`
 }
 
 func (ChargerBooted) eventType() Type { return TypeChargerBooted }
@@ -229,6 +233,7 @@ const (
 
 // MeterSample is the payload of meter.sample: one MeterValue element, units
 // normalised. Each value is nil when the element doesn't carry it.
+// SelectMeterSample applies the README's selection rules (M1-M7).
 type MeterSample struct {
 	TransactionID *int            `json:"transaction_id"`
 	EnergyWh      *float64        `json:"energy_wh"`
