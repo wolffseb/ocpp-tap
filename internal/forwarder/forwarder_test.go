@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -807,6 +808,118 @@ func TestSinkSessionsDifferAcrossReconnect(t *testing.T) {
 	if len(disconnected) != 1 || disconnected[0].Session != min(connected[0], connected[1]) ||
 		disconnected[0].Reason != "replaced by a new connection" {
 		t.Errorf("Disconnected %+v, want the older session replaced", disconnected)
+	}
+}
+
+// holdFirstConnectedSink stands in for a session goroutine that is
+// descheduled between registering and offering its Connected: it holds the
+// first Connected Offer until the second one has been recorded.
+type holdFirstConnectedSink struct {
+	mu       sync.Mutex
+	frames   []Frame
+	nConn    int
+	entered  chan struct{} // closed when the first Connected is held
+	released chan struct{} // closed when the second Connected is recorded
+}
+
+func (s *holdFirstConnectedSink) Offer(f Frame) {
+	if f.Kind == Connected {
+		s.mu.Lock()
+		s.nConn++
+		n := s.nConn
+		s.mu.Unlock()
+		switch n {
+		case 1:
+			close(s.entered)
+			select {
+			case <-s.released:
+			case <-time.After(5 * time.Second):
+			}
+		case 2:
+			defer close(s.released)
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.frames = append(s.frames, f)
+}
+
+func (s *holdFirstConnectedSink) snapshot() []Frame {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Frame(nil), s.frames...)
+}
+
+func describeFrames(fs []Frame) string {
+	var b strings.Builder
+	for _, f := range fs {
+		fmt.Fprintf(&b, "%s(s=%d) ", f.Kind, f.Session)
+	}
+	return b.String()
+}
+
+// The notices of a replaced session, its Connected included, can reach the
+// sink after the new session's Connected. This test forces that order and
+// checks that the rule documented on Frame (per charger, the highest Session
+// seen is current; lower is stale) leaves the charger connected.
+func TestSinkLateConnectedOfReplacedSessionIsStale(t *testing.T) {
+	t.Parallel()
+
+	up := newUpstream(t, nil)
+	sink := &holdFirstConnectedSink{entered: make(chan struct{}), released: make(chan struct{})}
+	_, base, _ := start(t, Options{Chargers: chargers{"CP1": cp(up, "CP1", "")}, Sink: sink})
+
+	firstCh := make(chan *websocket.Conn, 1)
+	go func() {
+		ws, _, err := dial(t, base, "/ocpp/CP1", dialOpts{})
+		if err != nil {
+			t.Errorf("first dial: %v", err)
+		}
+		firstCh <- ws
+	}()
+	<-up.connections
+	select {
+	case <-sink.entered: // session 1 is registered, its Connected is held
+	case <-time.After(3 * time.Second):
+		t.Fatal("first Connected never offered")
+	}
+
+	mustDial(t, base, "/ocpp/CP1", dialOpts{})
+	<-up.connections
+	first := <-firstCh
+	if first == nil {
+		t.FailNow()
+	}
+	waitClosed(t, first, 2*time.Second)
+	waitFor(t, func() bool { return len(sink.snapshot()) == 3 })
+
+	got := sink.snapshot()
+	// The reordering is real: the sink saw the newer Connected first.
+	if got[0].Kind != Connected || got[1].Kind != Connected || got[0].Session <= got[1].Session {
+		t.Fatalf("sink saw %s, want Connected(newer), Connected(older), ...", describeFrames(got))
+	}
+	if got[2].Kind != Disconnected || got[2].Session != got[1].Session {
+		t.Fatalf("sink saw %s, want the older session's Disconnected last", describeFrames(got))
+	}
+
+	// Apply the documented rule: the highest Session is current, anything
+	// lower is stale.
+	var current uint64
+	connected := false
+	for _, fr := range got {
+		if fr.Session < current {
+			continue // stale
+		}
+		current = fr.Session
+		switch fr.Kind {
+		case Connected:
+			connected = true
+		case Disconnected:
+			connected = false
+		}
+	}
+	if !connected || current != got[0].Session {
+		t.Errorf("after the rule: connected=%v current=%d, want connected on session %d", connected, current, got[0].Session)
 	}
 }
 

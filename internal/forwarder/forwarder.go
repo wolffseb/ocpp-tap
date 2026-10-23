@@ -110,10 +110,17 @@ func (k Kind) String() string {
 // charger connected or disconnected. Data must be treated as read-only by
 // everyone.
 //
-// For one session, Connected comes before its first Message and
-// Disconnected after its last. Across a reconnect, the replaced session's
-// Disconnected can come after the new session's Connected; Session tells
-// them apart.
+// Within one session, Connected comes before its first Message and
+// Disconnected after its last. Nothing orders one session's notices
+// against another's, though. When a charger reconnects, the replaced
+// session's Connected, its last Messages and its Disconnected can all
+// reach the sink after the new session's Connected (a session goroutine
+// can be descheduled between registering and offering).
+//
+// The rule for a consumer: per charger, the highest Session seen so far is
+// current, and a Frame of any Kind with a lower Session is stale. A stale
+// Disconnected must not mark the charger disconnected, and a stale
+// Connected must not make it current.
 type Frame struct {
 	Kind      Kind
 	ChargerID string
