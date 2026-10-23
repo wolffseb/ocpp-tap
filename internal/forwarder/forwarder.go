@@ -11,7 +11,8 @@
 //     charger is refused with 502. When either leg ends, the other is closed
 //     at once, so a charger is never held without a CPMS behind it.
 //   - Its one outward hook is FrameSink, which receives a copy of every frame
-//     and must not block. A panicking sink is contained.
+//     plus a notice when a charger connects or disconnects, and must not
+//     block. A panicking sink is contained.
 //   - It imports nothing from the tap, API or UI packages (depguard, and
 //     TestForwarderDependencies).
 package forwarder
@@ -27,6 +28,7 @@ import (
 	"net/url"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -78,17 +80,68 @@ func (d Direction) String() string {
 	return "downstream"
 }
 
-// Frame is a copy of one forwarded WebSocket message. Data must be treated as
-// read-only by everyone.
-type Frame struct {
-	ChargerID string
-	Dir       Direction
-	At        time.Time
-	Binary    bool
-	Data      []byte
+// Kind is what a Frame reports.
+type Kind int
+
+// The kinds of Frame.
+const (
+	// Message is a copy of one forwarded WebSocket message.
+	Message Kind = iota
+	// Connected: a charger was accepted and its relay is about to start.
+	Connected
+	// Disconnected: a charger's relay has ended and both legs are closed.
+	Disconnected
+)
+
+// String names the kind.
+func (k Kind) String() string {
+	switch k {
+	case Message:
+		return "message"
+	case Connected:
+		return "connected"
+	case Disconnected:
+		return "disconnected"
+	}
+	return "Kind(" + strconv.Itoa(int(k)) + ")"
 }
 
-// FrameSink receives a copy of every forwarded frame. Offer must not block.
+// Frame is a copy of one forwarded WebSocket message, or a notice that a
+// charger connected or disconnected. Data must be treated as read-only by
+// everyone.
+//
+// Within one session, Connected comes before its first Message and
+// Disconnected after its last. Nothing orders one session's notices
+// against another's, though. When a charger reconnects, the replaced
+// session's Connected, its last Messages and its Disconnected can all
+// reach the sink after the new session's Connected (a session goroutine
+// can be descheduled between registering and offering).
+//
+// The rule for a consumer: per charger, the highest Session seen so far is
+// current, and a Frame of any Kind with a lower Session is stale. A stale
+// Disconnected must not mark the charger disconnected, and a stale
+// Connected must not make it current.
+type Frame struct {
+	Kind      Kind
+	ChargerID string
+	// Session numbers charger connections in the order their handshakes
+	// arrived; a newer connection has a higher number.
+	Session uint64
+	At      time.Time
+
+	// Message only.
+	Dir    Direction
+	Binary bool
+	Data   []byte
+
+	// Subprotocol is the one agreed with both sides (Connected only).
+	Subprotocol string
+	// Reason is why the session ended (Disconnected only).
+	Reason string
+}
+
+// FrameSink receives a copy of every forwarded frame, and a notice when a
+// charger connects or disconnects. Offer must not block.
 type FrameSink interface {
 	Offer(Frame)
 }
@@ -172,7 +225,7 @@ func (f *Forwarder) Close() {
 	}
 	f.mu.Unlock()
 	for _, s := range all {
-		s.close(websocket.CloseGoingAway, "octap shutting down", websocket.CloseGoingAway)
+		s.close(websocket.CloseGoingAway, "octap shutting down", websocket.CloseGoingAway, "octap shutting down")
 	}
 	f.wg.Wait()
 }
@@ -244,11 +297,11 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch f.register(s) {
 	case shuttingDown:
-		s.close(websocket.CloseGoingAway, "octap shutting down", websocket.CloseGoingAway)
+		s.close(websocket.CloseGoingAway, "octap shutting down", websocket.CloseGoingAway, "octap shutting down")
 		return
 	case superseded:
 		log.Info("charger connection superseded by a newer one before it started")
-		s.close(websocket.CloseNormalClosure, "replaced by a new connection", websocket.CloseNormalClosure)
+		s.close(websocket.CloseNormalClosure, "replaced by a new connection", websocket.CloseNormalClosure, "replaced by a new connection")
 		return
 	}
 	defer f.wg.Done()
@@ -256,7 +309,9 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	began := time.Now()
 	log.Info("charger connected", "subprotocol", chosen, "upstream", hostOf(cfg.UpstreamURL))
+	f.offer(Frame{Kind: Connected, ChargerID: id, Session: seq, At: began, Subprotocol: chosen})
 	reason := f.relay(s)
+	f.offer(Frame{Kind: Disconnected, ChargerID: id, Session: seq, At: time.Now(), Reason: reason})
 	log.Info("charger disconnected", "reason", reason, "duration", time.Since(began).Round(time.Millisecond).String())
 }
 
@@ -319,7 +374,7 @@ func (f *Forwarder) register(s *session) registration {
 	f.mu.Unlock()
 	if old != nil {
 		// The charger reconnected; its previous connection is stale.
-		old.close(websocket.CloseNormalClosure, "replaced by a new connection", websocket.CloseNormalClosure)
+		old.close(websocket.CloseNormalClosure, "replaced by a new connection", websocket.CloseNormalClosure, "replaced by a new connection")
 	}
 	return registered
 }
@@ -348,27 +403,25 @@ func (f *Forwarder) relay(s *session) string {
 	go func() { failed <- f.pump(s, s.up, s.down, Downstream) }()
 	go s.keepalive(f.opts.PingInterval)
 
-	var reason string
 	pending := 2
 	select {
 	case l := <-failed:
 		pending--
+		// If the session was closed from outside, that close is what made
+		// the pump fail; s.close is then a no-op and its reason stands.
 		if l == upstreamLeg {
-			reason = "upstream lost"
-			s.close(websocket.CloseInternalServerErr, "upstream lost", websocket.CloseNormalClosure)
+			s.close(websocket.CloseInternalServerErr, "upstream lost", websocket.CloseNormalClosure, "upstream lost")
 		} else {
-			reason = "charger left"
-			s.close(websocket.CloseNormalClosure, "", websocket.CloseNormalClosure)
+			s.close(websocket.CloseNormalClosure, "", websocket.CloseNormalClosure, "charger left")
 		}
 	case <-s.done:
 		// Closed from outside: replaced by a reconnect, or shutdown.
-		reason = s.reason()
 	}
 	// Closing both sockets ends whichever pumps are still running.
 	for ; pending > 0; pending-- {
 		<-failed
 	}
-	return reason
+	return s.reason()
 }
 
 // pump copies messages from src to dst and reports which leg failed.
@@ -387,7 +440,7 @@ func (f *Forwarder) pump(s *session, src, dst *websocket.Conn, dir Direction) le
 			return srcLeg
 		}
 		_ = src.SetReadDeadline(time.Now().Add(timeout))
-		f.offer(Frame{ChargerID: s.id, Dir: dir, At: time.Now(), Binary: typ == websocket.BinaryMessage, Data: data})
+		f.offer(Frame{Kind: Message, ChargerID: s.id, Session: s.seq, At: time.Now(), Dir: dir, Binary: typ == websocket.BinaryMessage, Data: data})
 
 		_ = dst.SetWriteDeadline(time.Now().Add(f.opts.WriteTimeout))
 		if err := dst.WriteMessage(typ, data); err != nil {
@@ -421,10 +474,11 @@ type session struct {
 	done        chan struct{}
 }
 
-// close sends close frames to both legs and closes them, once.
-func (s *session) close(chargerCode int, chargerText string, upstreamCode int) {
+// close sends close frames to both legs and closes them, once. The first
+// caller's reason is the session's.
+func (s *session) close(chargerCode int, chargerText string, upstreamCode int, reason string) {
 	s.closeOnce.Do(func() {
-		s.closeReason = chargerText
+		s.closeReason = reason
 		deadline := time.Now().Add(closeWait)
 		_ = s.down.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(chargerCode, chargerText), deadline)
 		_ = s.up.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(upstreamCode, ""), deadline)
