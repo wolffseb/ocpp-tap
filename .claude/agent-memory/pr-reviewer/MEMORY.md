@@ -15,6 +15,7 @@ Lessons from earlier reviews in this repo. Newest last. Keep generalised; prune 
 - **Parser boundary narrower than the documented one** (2026-10-23, #8). A rule saying "any ISO 8601" was backed by `time.Parse(RFC3339)` plus one fallback, so `+0200`/`+02` offsets (C `%z`, Java `Z`) silently dropped events. Feed a documented input grammar its edge forms in a scratch test, and cite the section number from the spec file, not memory.
 - **A regex in front of a library parser narrows it silently** (2026-10-23, #8). Putting a hand-written grammar regex in front of `time.Parse` to widen one form (offsets without a colon) dropped forms the library had accepted, e.g. a comma decimal sign (`09:15:00,5Z`, ISO 8601's preferred sign). Run the old and new parser side by side on the same edge inputs, and diff what each accepts.
 - **Cross-goroutine order of lifecycle notices** (2026-10-23, #9). Notices offered from different sessions' goroutines (Connected/Disconnected around `register`) have no order between sessions; a doc that names only *one* notice as possibly late is usually missing others. Prove orderings with a sink that holds one `Offer` until another arrives (stands in for preemption), and check the consumer contract (event ids, `received_at`) can still recover the truth.
+- **Closed flag checked, then a channel send** (2026-10-23, #9). An `atomic.Bool` "closed" checked before a non-blocking send races `Close`+drain: the frame lands in a buffer nobody reads, uncounted. It needs a lock (RLock in Offer, Lock in Close) or the send under the same guard. Don't suggest the lock-free version as a fix.
 
 ## Checks that paid off
 
@@ -31,6 +32,7 @@ Lessons from earlier reviews in this repo. Newest last. Keep generalised; prune 
 - Pending GitHub review comments can't be edited through the MCP tools: draft each comment fully before adding it (`delete_pending` and redo otherwise).
 - To find what a relative latency gate (phase A vs. phase B) can detect, mutate the hot path with a busy-wait of N µs, not a timer: Go timers round sub-ms waits up to ~1 ms and overstate sensitivity. Also try a cost paid in both phases; a relative check can't see it by construction.
 - Running one e2e test outside `make e2e` needs `make harness-deps build` in the worktree plus `E2E_SIMULATOR`/`E2E_PROXY` set (see the Makefile `e2e` target); without them the package fails in milliseconds and looks like a mutation result.
+- A race test with many goroutines rarely hits a nanosecond check-then-act window. To see whether a lock is pinned, swap it for the lock-free variant with and without `runtime.Gosched()` in the window: if only the Gosched version fails, the test doesn't cover the lock; ask for a deterministic test that holds the lock itself (2026-10-23, #9).
 
 ## False alarms to avoid
 
