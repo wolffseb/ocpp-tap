@@ -60,6 +60,7 @@ Owner, license (no `LICENSE` file until decided), UI library access, branding, t
 | --- | --- |
 | `cmd/octap/` | the binary |
 | `internal/forwarder/` | the only inline part (SP1) |
+| `internal/config/` | trial-mode config file, read at startup (SP4 adds writing and reload) |
 | `internal/tap/` | read-only event tap (SP2) |
 | `internal/ocpp/ocppj/` | OCPP-J framing and correlation, copied from `headless-csms` (see `NOTICE`) |
 | `harness/` | SP0 test harness; never ships in the image |

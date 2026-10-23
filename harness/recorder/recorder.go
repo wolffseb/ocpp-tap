@@ -7,12 +7,13 @@
 // not expose its frames, so this is where they are captured. Compare the
 // result with the harness CPMS's log using frames.Compare.
 //
-// It is deliberately separate from the placeholder passthrough: the
+// It is deliberately separate from the forwarder it measures: the
 // recorder is part of the measuring instrument, the proxy is the thing
 // measured, and they must not share code.
 package recorder
 
 import (
+	"encoding/base64"
 	"log/slog"
 	"net/http"
 	"path"
@@ -30,6 +31,11 @@ const writeWait = 10 * time.Second
 // Recorder is an http.Handler that accepts chargers and relays them to
 // Upstream.
 type Recorder struct {
+	// Credentials, when set before serving, supplies Basic Auth for chargers
+	// that cannot send it themselves; ok false leaves the request as is. A
+	// charger's own Authorization header always goes through unchanged.
+	Credentials func(id string) (user, pass string, ok bool)
+
 	upstream string
 	log      *slog.Logger
 	frames   frames.Log
@@ -93,11 +99,19 @@ func (r *Recorder) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		target += "?" + req.URL.RawQuery
 	}
 
+	header := http.Header{}
+	if auth := req.Header.Get("Authorization"); auth != "" {
+		header.Set("Authorization", auth)
+	} else if r.Credentials != nil {
+		if user, pass, ok := r.Credentials(id); ok {
+			header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(user+":"+pass)))
+		}
+	}
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
 		Subprotocols:     websocket.Subprotocols(req),
 	}
-	up, resp, err := dialer.DialContext(req.Context(), target, nil)
+	up, resp, err := dialer.DialContext(req.Context(), target, header)
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}

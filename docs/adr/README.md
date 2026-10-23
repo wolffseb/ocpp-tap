@@ -6,7 +6,7 @@ Per the PRD, changing a principle, an acceptance number, or a published event sc
 
 | ADR | Title | Status |
 | --- | --- | --- |
-| [0001](0001-architecture.md) | Forwarder/tap split, fail closed, tap copies, trial config | Proposed |
+| [0001](0001-architecture.md) | Forwarder/tap split, fail closed, tap copies, trial config | Accepted |
 
 ## Template
 

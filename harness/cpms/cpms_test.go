@@ -296,6 +296,23 @@ func TestWaitCalls(t *testing.T) {
 	}
 }
 
+func TestConnectionsCountsEachHandshake(t *testing.T) {
+	t.Parallel()
+
+	s, base := start(t, Options{})
+	first := mustDial(t, base, "CP1")
+	_ = first.ws.Close()
+	second := mustDial(t, base, "CP1")
+	second.send(`[2,"1","Heartbeat",{}]`)
+	second.mustRead()
+	if n := s.Connections("CP1"); n != 2 {
+		t.Errorf("Connections = %d, want 2", n)
+	}
+	if n := s.Connections("CP2"); n != 0 {
+		t.Errorf("Connections(CP2) = %d, want 0", n)
+	}
+}
+
 func TestRefusesWithoutOCPP16(t *testing.T) {
 	t.Parallel()
 

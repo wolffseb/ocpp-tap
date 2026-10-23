@@ -11,11 +11,10 @@ HEADLESS_CSMS_SHA  := 603c2d112c736ff98e44844a57fb63dbda7096e3
 CACHE              := $(CURDIR)/.cache
 SIMULATOR          := $(CACHE)/bin/cpms-$(HEADLESS_CSMS_SHA)
 
-# The proxy under test. Any binary taking -listen ADDR -upstream URL works;
-# SP1 swaps in octap.
-PROXY ?= $(CURDIR)/bin/placeholder-proxy
+# The proxy under test: octap, run as `octap run -config FILE -listen ADDR`.
+PROXY ?= $(CURDIR)/bin/$(BINARY)
 
-.PHONY: all build test race vet lint fmt check-fmt tidy clean ci e2e harness-deps placeholder
+.PHONY: all build test race vet lint fmt check-fmt tidy clean ci e2e harness-deps
 
 all: build
 
@@ -64,11 +63,8 @@ $(SIMULATOR):
 	git -C $(CACHE)/headless-csms -c advice.detachedHead=false checkout -q FETCH_HEAD
 	cd $(CACHE)/headless-csms && go build -o $(SIMULATOR) ./cmd/cpms
 
-placeholder:
-	go build -o bin/placeholder-proxy ./harness/cmd/placeholder-proxy
-
 ## e2e: charger -> proxy -> CPMS through the SP0 harness, all scenarios
 ## (the -timeout is the PRD's 3-minute budget)
-e2e: harness-deps placeholder
+e2e: harness-deps build
 	E2E_SIMULATOR=$(SIMULATOR) E2E_PROXY=$(PROXY) \
 		go test -tags e2e -count=1 -timeout 3m -v ./e2e/...

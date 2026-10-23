@@ -28,6 +28,7 @@ type message struct {
 // path and subprotocols it was dialled with, and sends what it is told to.
 type upstream struct {
 	srv      *httptest.Server
+	auth     chan string
 	received chan message
 	toSend   chan message
 	path     chan string
@@ -37,6 +38,7 @@ type upstream struct {
 func newUpstream(t *testing.T) *upstream {
 	t.Helper()
 	u := &upstream{
+		auth:     make(chan string, 10),
 		received: make(chan message, 100),
 		toSend:   make(chan message, 100),
 		path:     make(chan string, 10),
@@ -44,6 +46,7 @@ func newUpstream(t *testing.T) *upstream {
 	}
 	u.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u.path <- r.URL.Path
+		u.auth <- r.Header.Get("Authorization")
 		u.offered <- websocket.Subprotocols(r)
 		up := websocket.Upgrader{Subprotocols: []string{"ocpp1.6"}}
 		ws, err := up.Upgrade(w, r, nil)
@@ -82,8 +85,13 @@ func startRecorder(t *testing.T, upstreamURL string) (*Recorder, string) {
 
 func dialCharger(t *testing.T, base, path string) (*websocket.Conn, int, error) {
 	t.Helper()
+	return dialChargerWith(t, base, path, nil)
+}
+
+func dialChargerWith(t *testing.T, base, path string, h http.Header) (*websocket.Conn, int, error) {
+	t.Helper()
 	d := websocket.Dialer{Subprotocols: []string{"ocpp1.6"}, HandshakeTimeout: 2 * time.Second}
-	ws, resp, err := d.Dial(base+path, nil)
+	ws, resp, err := d.Dial(base+path, h)
 	status := 0
 	if resp != nil {
 		status = resp.StatusCode
@@ -254,5 +262,47 @@ func waitLen(t *testing.T, l *frames.Log, n int) {
 			t.Fatalf("recorded %d frames, want %d", l.Len(), n)
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// The charger's own Authorization header goes through to the proxy, since
+// the proxy under test checks it.
+func TestForwardsChargerAuthorization(t *testing.T) {
+	t.Parallel()
+
+	up := newUpstream(t)
+	_, base := startRecorder(t, wsURL(up.srv))
+	h := http.Header{"Authorization": {"Basic Q1AxOnB3"}}
+	if _, _, err := dialChargerWith(t, base, "/ocpp/CP1", h); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-up.auth; got != "Basic Q1AxOnB3" {
+		t.Errorf("upstream Authorization = %q", got)
+	}
+}
+
+// For chargers that cannot send Basic Auth themselves (the headless-csms
+// simulator), the recorder adds configured credentials.
+func TestAddsConfiguredCredentials(t *testing.T) {
+	t.Parallel()
+
+	up := newUpstream(t)
+	r := New(wsURL(up.srv), quiet())
+	r.Credentials = func(id string) (string, string, bool) { return id, "pw-" + id, id == "CP1" }
+	srv := httptest.NewServer(r)
+	t.Cleanup(func() { r.Close(); srv.Close() })
+	base := wsURL(srv)
+
+	if _, _, err := dialCharger(t, base, "/ocpp/CP1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-up.auth; got != "Basic Q1AxOnB3LUNQMQ==" { // CP1:pw-CP1
+		t.Errorf("upstream Authorization = %q", got)
+	}
+	if _, _, err := dialCharger(t, base, "/ocpp/CP2"); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-up.auth; got != "" {
+		t.Errorf("CP2 upstream Authorization = %q, want none", got)
 	}
 }

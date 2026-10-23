@@ -2,31 +2,32 @@
 
 // Package e2e runs the SP0 harness end to end:
 //
-//	charger (headless-csms simulator, or loadgen) → recorder → proxy under test → harness CPMS
+//	charger (headless-csms simulator, or loadgen) → recorder → octap → harness CPMS
 //
 // and checks that every frame the charger sent is byte-identical to what the
 // CPMS received, and the other way round. Run it with `make e2e`, which
 // builds the pinned simulator and the proxy and sets:
 //
 //	E2E_SIMULATOR  path to headless-csms's cpms binary
-//	E2E_PROXY      path to the proxy under test (flags: -listen, -upstream)
-//
-// Fail-closed timing and latency targets are SP1 and are not asserted here.
+//	E2E_PROXY      path to the octap binary under test
 package e2e
 
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -72,74 +73,94 @@ func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)
 
 func wsURL(srv *httptest.Server) string { return "ws" + strings.TrimPrefix(srv.URL, "http") }
 
-// rig is one isolated chain: harness CPMS ← proxy ← recorder.
+// rig is one isolated chain: harness CPMS ← octap ← recorder.
 type rig struct {
 	cpms     *cpms.Server
 	rec      *recorder.Recorder
+	proxy    *proxy
 	proxyURL string // chargers that record themselves dial this
 	recURL   string // chargers that need recording dial this
 }
 
-func newRig(t *testing.T, opts cpms.Options) *rig {
+// password is each charger's downstream Basic Auth password in the e2e
+// config.
+func password(id string) string { return "pw-" + id }
+
+// newRig starts a harness CPMS, an octap configured for the given charger
+// ids (each with a password), and a recorder in front of octap.
+func newRig(t *testing.T, opts cpms.Options, ids ...string) *rig {
 	t.Helper()
 	opts.Log = quiet()
 	c := cpms.New(opts)
 	cpmsSrv := httptest.NewServer(c)
 	t.Cleanup(func() { c.Close(); cpmsSrv.Close() })
 
-	proxyURL := startProxy(t, wsURL(cpmsSrv))
-	return withRecorder(t, c, proxyURL)
-}
-
-func withRecorder(t *testing.T, c *cpms.Server, proxyURL string) *rig {
-	t.Helper()
-	rec := recorder.New(proxyURL, quiet())
+	p := startProxy(t, wsURL(cpmsSrv), ids)
+	rec := recorder.New(p.url, quiet())
+	rec.Credentials = func(id string) (string, string, bool) { return id, password(id), true }
 	recSrv := httptest.NewServer(rec)
 	t.Cleanup(func() { rec.Close(); recSrv.Close() })
-	return &rig{cpms: c, rec: rec, proxyURL: proxyURL, recURL: wsURL(recSrv)}
+	return &rig{cpms: c, rec: rec, proxy: p, proxyURL: p.url, recURL: wsURL(recSrv)}
 }
 
-// startProxy runs the proxy under test as its own process and waits until it
-// accepts connections.
-func startProxy(t *testing.T, upstream string) string {
+// proxy is the octap process under test.
+type proxy struct {
+	url string
+	cmd *exec.Cmd
+	out *syncBuffer
+}
+
+// startProxy writes an octap config routing each id to upstream/ocpp/{id},
+// runs `octap run` as its own process, and waits until it accepts
+// connections.
+func startProxy(t *testing.T, upstream string, ids []string) *proxy {
 	t.Helper()
-	addr := freeAddr(t)
-	var out syncBuffer
-	cmd := exec.Command(proxyBin, "-listen", addr, "-upstream", upstream)
-	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start proxy: %v", err)
+	chargers := make([]map[string]string, 0, len(ids))
+	for _, id := range ids {
+		chargers = append(chargers, map[string]string{
+			"id": id, "password": password(id), "upstream_url": upstream + "/ocpp/" + id,
+		})
+	}
+	cfg, err := json.Marshal(map[string]any{"version": 1, "chargers": chargers})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, cfg, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// octap picks its own port and logs it; reading it back avoids the race
+	// of choosing a free port here and handing it over.
+	p := &proxy{out: &syncBuffer{}}
+	p.cmd = exec.Command(proxyBin, "run", "-config", cfgPath, "-listen", "127.0.0.1:0", "-log-level", "debug")
+	p.cmd.Stdout, p.cmd.Stderr = p.out, p.out
+	if err := p.cmd.Start(); err != nil {
+		t.Fatalf("start octap: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		_ = p.cmd.Process.Kill()
+		_ = p.cmd.Wait()
 		if t.Failed() {
-			t.Logf("proxy output:\n%s", out.String())
+			t.Logf("octap output:\n%s", p.out.String())
 		}
 	})
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
-		if err == nil {
-			_ = conn.Close()
-			return "ws://" + addr
+		if m := listenLine.FindStringSubmatch(p.out.String()); m != nil {
+			p.url = m[1]
+			return p
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("proxy not listening on %s: %v\n%s", addr, err, out.String())
+			t.Fatalf("octap did not report its listen address:\n%s", p.out.String())
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
-func freeAddr(t *testing.T) string {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-	return l.Addr().String()
-}
+// listenLine matches octap's startup log line, which it writes once the
+// listener is bound.
+var listenLine = regexp.MustCompile(`msg="octap forwarding" .*listen=(ws://\S+)`)
 
 // simulator is one `cpms simulate charger` process.
 type simulator struct {
@@ -305,8 +326,8 @@ func TestSimulatorScenarios(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.scenario, func(t *testing.T) {
 			t.Parallel()
-			r := newRig(t, cpms.Options{HeartbeatInterval: 2, CallTimeout: 60 * time.Second})
 			id := "SIM-" + tc.scenario
+			r := newRig(t, cpms.Options{HeartbeatInterval: 2, CallTimeout: 60 * time.Second}, id)
 			startSimulator(t, r.recURL, id, tc.scenario)
 
 			// Boot plus status for the station and both connectors.
@@ -328,7 +349,7 @@ func TestSimulatorScenarios(t *testing.T) {
 func TestCPMSDown(t *testing.T) {
 	t.Parallel()
 
-	r := newRig(t, cpms.Options{Mode: cpms.ModeDown})
+	r := newRig(t, cpms.Options{Mode: cpms.ModeDown}, "SIM-down")
 	sim := startSimulator(t, r.recURL, "SIM-down", "normal")
 	if err := sim.exited(t, 15*time.Second); err == nil {
 		t.Error("simulator exited cleanly with the CPMS down")
@@ -344,7 +365,7 @@ func TestCPMSDown(t *testing.T) {
 func TestCPMSRejectBoot(t *testing.T) {
 	t.Parallel()
 
-	r := newRig(t, cpms.Options{Mode: cpms.ModeRejectBoot})
+	r := newRig(t, cpms.Options{Mode: cpms.ModeRejectBoot}, "SIM-reject")
 	sim := startSimulator(t, r.recURL, "SIM-reject", "normal")
 	if err := sim.exited(t, 15*time.Second); err == nil {
 		t.Error("simulator exited cleanly after a rejected boot")
@@ -359,7 +380,7 @@ func TestCPMSSlow(t *testing.T) {
 	t.Parallel()
 
 	const delay = 1 * time.Second
-	r := newRig(t, cpms.Options{Mode: cpms.ModeSlow, SlowDelay: delay, HeartbeatInterval: 2})
+	r := newRig(t, cpms.Options{Mode: cpms.ModeSlow, SlowDelay: delay, HeartbeatInterval: 2}, "SIM-slowcpms")
 	began := time.Now()
 	startSimulator(t, r.recURL, "SIM-slowcpms", "normal")
 	waitCalls(t, r.cpms, "SIM-slowcpms", "StatusNotification", 3, 20*time.Second)
@@ -373,7 +394,7 @@ func TestCPMSDropAfterN(t *testing.T) {
 	t.Parallel()
 
 	const n = 3
-	r := newRig(t, cpms.Options{Mode: cpms.ModeDropAfterN, DropAfter: n})
+	r := newRig(t, cpms.Options{Mode: cpms.ModeDropAfterN, DropAfter: n}, "SIM-drop")
 	sim := startSimulator(t, r.recURL, "SIM-drop", "normal")
 
 	// Boot, status(0), status(1): the third frame is received and the CPMS
@@ -387,20 +408,31 @@ func TestCPMSDropAfterN(t *testing.T) {
 	assertIdentical(t, r.rec.Frames(), r.cpms.Frames(), 2*n-1)
 }
 
-// --- load ------------------------------------------------------------------
+// --- load and performance (SP1) ---------------------------------------------
 
-// 100 chargers in one process at 1 message/s each, through the proxy.
-// Latency is reported, not asserted: the targets belong to SP1.
+// SP1 targets, from docs/PRD.md. Changing them needs an ADR.
+const (
+	latencyP99Target = 20 * time.Millisecond
+	memoryTarget     = 100 << 20 // bytes
+)
+
+// 100 chargers in one process at 1 message/s each, through octap: frames
+// identical, forwarding latency p99 < 20 ms, octap memory < 100 MB.
 func TestLoad(t *testing.T) {
 	t.Parallel()
 
 	const chargers, messages = 100, 20
-	r := newRig(t, cpms.Options{})
+	ids := make([]string, chargers)
+	for i := range ids {
+		ids[i] = loadgen.ChargerID("LOAD", i)
+	}
+	r := newRig(t, cpms.Options{}, ids...)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	fleet := loadgen.Start(ctx, loadgen.Options{
-		URL: r.proxyURL, N: chargers, Messages: messages, Interval: time.Second, Log: quiet(),
+		URL: r.proxyURL, N: chargers, Messages: messages, Interval: time.Second,
+		Password: password, Log: quiet(),
 	})
 	res := fleet.Wait()
 	defer fleet.Close()
@@ -411,12 +443,84 @@ func TestLoad(t *testing.T) {
 	if want := chargers * (2 + messages); len(res.Latencies) != want {
 		t.Errorf("%d calls answered, want %d", len(res.Latencies), want)
 	}
-	l := res.Latencies
-	slices.Sort(l)
-	t.Logf("load: %d chargers, %d calls, round trip p50 %s p99 %s max %s (informational; SP1 owns the target)",
-		chargers, len(l), l[len(l)/2], l[len(l)*99/100], l[len(l)-1])
-
 	assertIdentical(t, fleet.Frames(), r.cpms.Frames(), chargers*(2+messages)*2)
+
+	// Latency: every frame's one-way time through octap. Both logs are
+	// stamped by this process's clock, so the difference is meaningful. It
+	// includes loopback's own cost, so it bounds the added latency from
+	// above.
+	lat := oneWayLatencies(t, fleet.Frames(), r.cpms.Frames())
+	slices.Sort(lat)
+	p50, p99, worst := lat[len(lat)/2], lat[len(lat)*99/100], lat[len(lat)-1]
+	t.Logf("latency through octap: %d frames, p50 %s, p99 %s, max %s (target p99 < %s)",
+		len(lat), p50, p99, worst, latencyP99Target)
+	if p99 >= latencyP99Target {
+		t.Errorf("latency p99 %s, target < %s", p99, latencyP99Target)
+	}
+
+	peak, err := peakRSS(r.proxy.cmd.Process.Pid)
+	if err != nil {
+		t.Fatalf("reading octap memory: %v", err)
+	}
+	t.Logf("octap peak RSS with %d chargers: %.1f MB (target < %d MB)", chargers, float64(peak)/(1<<20), memoryTarget>>20)
+	if peak >= memoryTarget {
+		t.Errorf("octap peak RSS %d bytes, target < %d", peak, memoryTarget)
+	}
+}
+
+// oneWayLatencies pairs each frame with its counterpart on the other side
+// (the logs are already known to be identical) and returns receive time
+// minus send time.
+func oneWayLatencies(t *testing.T, chargerSide, cpmsSide *frames.Log) []time.Duration {
+	t.Helper()
+	type key struct {
+		charger string
+		dir     frames.Direction
+	}
+	group := func(l *frames.Log) map[key][]frames.Frame {
+		m := map[key][]frames.Frame{}
+		for _, f := range l.Frames() {
+			k := key{f.Charger, f.Dir}
+			m[k] = append(m[k], f)
+		}
+		return m
+	}
+	a, b := group(chargerSide), group(cpmsSide)
+	var out []time.Duration
+	for k, sent := range a {
+		recv := b[k]
+		if len(recv) != len(sent) {
+			t.Fatalf("%v: %d vs %d frames", k, len(sent), len(recv))
+		}
+		for i := range sent {
+			d := recv[i].At.Sub(sent[i].At)
+			if k.dir == frames.Downstream {
+				d = -d
+			}
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// peakRSS is the process's peak resident set size. Linux reports the high
+// water mark; elsewhere the current RSS from ps is the best available.
+func peakRSS(pid int) (int64, error) {
+	if b, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid)); err == nil {
+		for _, line := range strings.Split(string(b), "\n") {
+			if f := strings.Fields(line); len(f) >= 2 && f[0] == "VmHWM:" {
+				kb, err := strconv.ParseInt(f[1], 10, 64)
+				return kb << 10, err
+			}
+		}
+		return 0, errors.New("no VmHWM in /proc status")
+	}
+	out, err := exec.Command("ps", "-o", "rss=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return 0, err
+	}
+	kb, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	return kb << 10, err
 }
 
 // --- the check itself -------------------------------------------------------
@@ -449,7 +553,7 @@ func TestFrameCheckCatchesAlteration(t *testing.T) {
 	t.Logf("altering proxy caught: %d diffs, first: %v", len(diffs), diffs[0])
 }
 
-// mutatingProxy forwards like the placeholder but appends a space to every
+// mutatingProxy forwards like a passthrough but appends a space to every
 // charger-to-CPMS frame: still valid JSON, no longer byte-identical.
 func mutatingProxy(upstream string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
