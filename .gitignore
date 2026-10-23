@@ -36,3 +36,6 @@ go.work.sum
 bin/
 .cache/
 e2e-artifacts/
+
+# Agent worktrees (one per running agent; never committed)
+.claude/worktrees/
