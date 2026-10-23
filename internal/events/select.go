@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -176,10 +177,11 @@ func selectValue(connectorID int, values []SampledValue, spec measurandSpec) (*f
 }
 
 // frameTime is the grammar of README rule T1: an ISO 8601 extended date and
-// time, optional fractional seconds, and an optional zone designator (Z or
-// an offset of the form +hh:mm, +hhmm or +hh).
+// time, optional fractional seconds (decimal sign . or ,, as ISO 8601 allows),
+// and an optional zone designator (Z or an offset of the form +hh:mm, +hhmm
+// or +hh).
 var frameTime = regexp.MustCompile(
-	`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?)(?:Z|([+-]\d{2})(?::?(\d{2}))?)?$`)
+	`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)(?:Z|([+-]\d{2})(?::?(\d{2}))?)?$`)
 
 // ParseFrameTime reads an OCPP timestamp (README rule T1). A time with a zone
 // designator (Z or an offset, with or without a colon) is converted to UTC.
@@ -201,7 +203,8 @@ func ParseFrameTime(s string) (time.Time, error) {
 		}
 		zone = m[2] + ":" + mm
 	}
-	t, err := time.Parse(time.RFC3339Nano, m[1]+zone)
+	// time.Parse takes only a point before the fraction.
+	t, err := time.Parse(time.RFC3339Nano, strings.Replace(m[1], ",", ".", 1)+zone)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("events: %q is not an OCPP timestamp: %w", s, err)
 	}
