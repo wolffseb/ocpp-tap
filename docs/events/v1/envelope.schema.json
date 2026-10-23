@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ocpp-tap event envelope, v1",
+  "description": "Fields every v1 event carries. Each event type's schema refers to this one and narrows type, connector_id, timestamp and data. See README.md.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "description": "Always \"1\" for this schema. A breaking change is a new major version.",
+      "const": "1"
+    },
+    "id": {
+      "description": "UUIDv7, lowercase. Unique per event and time-ordered: within one octap process, a later event has a greater id.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "type": {
+      "description": "The event type, e.g. \"connector.status\". Consumers ignore types they don't know.",
+      "type": "string",
+      "pattern": "^[a-z]+(\\.[a-z_]+)+$"
+    },
+    "charger_id": {
+      "description": "The charge point identity: the last segment of the URL path the charger dialled.",
+      "type": "string",
+      "minLength": 1
+    },
+    "connector_id": {
+      "description": "OCPP connector id. 0 means the charge point as a whole. null only where the event type allows it (a transaction.stopped whose start octap did not see).",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "timestamp": {
+      "description": "The time the charger put in the frame, in UTC with a Z suffix. A time with an offset is converted; a time with no zone designator is read as UTC (README rule T1). null when the frame carries none.",
+      "type": ["string", "null"],
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+    },
+    "received_at": {
+      "description": "When octap read the frame (or saw the connection change), in UTC, up to nanosecond precision.",
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+    },
+    "data": {
+      "description": "The type-specific payload.",
+      "type": "object"
+    }
+  },
+  "required": ["schema_version", "id", "type", "charger_id", "connector_id", "timestamp", "received_at", "data"]
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "charger.disconnected, v1",
+  "description": "A charger's connection ended. octap fails closed, so the charger and CPMS legs end together.",
+  "$ref": "envelope.schema.json",
+  "properties": {
+    "type": { "const": "charger.disconnected" },
+    "connector_id": { "const": 0 },
+    "timestamp": { "const": null },
+    "data": { "$ref": "#/$defs/data" }
+  },
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "description": "Why the connection ended, for people (e.g. \"charger left\", \"upstream lost\"). Free text: don't branch on it.",
+          "type": "string"
+        }
+      },
+      "required": ["reason"]
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "transaction.stopped, v1",
+  "description": "A StopTransaction. timestamp is StopTransaction.req timestamp. StopTransaction carries no connector id: connector_id is the one from the matching transaction.started, or null when octap did not see the start.",
+  "$ref": "envelope.schema.json",
+  "properties": {
+    "type": { "const": "transaction.stopped" },
+    "timestamp": { "type": "string" },
+    "data": { "$ref": "#/$defs/data" }
+  },
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "transaction_id": {
+          "description": "StopTransaction.req transactionId.",
+          "type": "integer"
+        },
+        "meter_stop_wh": {
+          "description": "StopTransaction.req meterStop, in Wh.",
+          "type": "integer"
+        },
+        "reason": {
+          "description": "StopTransaction.req reason (OCPP 1.6 Reason), or null when the charger left it out (OCPP then means Local).",
+          "enum": ["EmergencyStop", "EVDisconnected", "HardReset", "Local", "Other", "PowerLoss", "Reboot", "Remote", "SoftReset", "UnlockCommand", "DeAuthorized", null]
+        },
+        "id_tag": {
+          "description": "StopTransaction.req idTag, or null. Personal data: usually an RFID card UID. See README.md.",
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["transaction_id", "meter_stop_wh", "reason", "id_tag"]
+    }
+  }
+}

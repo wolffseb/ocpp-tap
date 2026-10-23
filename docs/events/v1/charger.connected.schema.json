@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "charger.connected, v1",
+  "description": "A charger's WebSocket connection was accepted and its CPMS connection is up.",
+  "$ref": "envelope.schema.json",
+  "properties": {
+    "type": { "const": "charger.connected" },
+    "connector_id": { "const": 0 },
+    "timestamp": { "const": null },
+    "data": { "$ref": "#/$defs/data" }
+  },
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "subprotocol": {
+          "description": "The WebSocket subprotocol both sides agreed on, e.g. \"ocpp1.6\".",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["subprotocol"]
+    }
+  }
+}

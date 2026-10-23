@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "connector.status, v1",
+  "description": "A StatusNotification. status is the full OCPP 1.6 ChargePointStatus, never collapsed. timestamp is null when the charger left it out (it is optional in OCPP 1.6).",
+  "$ref": "envelope.schema.json",
+  "properties": {
+    "type": { "const": "connector.status" },
+    "connector_id": { "type": "integer" },
+    "data": { "$ref": "#/$defs/data" }
+  },
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "description": "OCPP 1.6 ChargePointStatus, exactly as the charger sent it.",
+          "enum": ["Available", "Preparing", "Charging", "SuspendedEVSE", "SuspendedEV", "Finishing", "Reserved", "Unavailable", "Faulted"]
+        },
+        "error_code": {
+          "description": "OCPP 1.6 ChargePointErrorCode, exactly as the charger sent it.",
+          "enum": [
+            "ConnectorLockFailure",
+            "EVCommunicationError",
+            "GroundFailure",
+            "HighTemperature",
+            "InternalError",
+            "LocalListConflict",
+            "NoError",
+            "OtherError",
+            "OverCurrentFailure",
+            "PowerMeterFailure",
+            "PowerSwitchFailure",
+            "ReaderFailure",
+            "ResetFailure",
+            "UnderVoltage",
+            "OverVoltage",
+            "WeakSignal"
+          ]
+        },
+        "info": {
+          "description": "StatusNotification.req info, or null.",
+          "type": ["string", "null"]
+        },
+        "vendor_id": {
+          "description": "StatusNotification.req vendorId, or null.",
+          "type": ["string", "null"]
+        },
+        "vendor_error_code": {
+          "description": "StatusNotification.req vendorErrorCode, or null.",
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["status", "error_code", "info", "vendor_id", "vendor_error_code"]
+    }
+  }
+}
