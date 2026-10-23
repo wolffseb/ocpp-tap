@@ -15,6 +15,12 @@ Lessons from earlier fix passes in this repo. Newest last within each section. K
 - Async work needs a deterministic gate in the fake (a channel the test releases) and a wait before asserting. Never sleep to "let it happen".
 - Give every wait a failure deadline, and always pass `-timeout` to `go test`, so old code fails quickly instead of hanging.
 - A fix to a race can introduce the next one (#4: moving `wg.Add` out of the lock). Re-read the diff for every lock and goroutine it touches.
+- When a review asks for prose rules (a README contract), make them testable: a machine-readable case file plus a test that ties every rule id in the README to at least one case. A test pinned to a README sentence makes a doc-only fix testable first. (2026-10-23, #8)
+- A mutation that only fails to compile, or an equivalent one, is not a catch: print the `--- FAIL` test names per mutation. For a rejection-only case, loosen the guard (e.g. `(?i)`); if another layer already rejects the input, say the case guards the documented rule. (2026-10-23, #8)
+- Go's `time.Parse` accepts offset minutes up to 99 (`+0260`); validate bounds yourself when a spec limits them. (2026-10-23, #8)
+- A doc/test-only fix for a reordering finding can't be shown failing: force the reorder with a sink that holds an `Offer` and assert the order actually occurred. (2026-10-23, #9)
+- A closed flag checked before a non-blocking send races a concurrent `Close`: guard both (read lock in `Offer`, write lock in `Close`), test handled + dropped == offered, and pin the lock deterministically by holding the read lock in the test and detecting the queued writer with `TryRLock()` failing. No sleeps. (2026-10-23, #9)
+- staticcheck QF1006 flags `for { if cond { break } … }`; write the loop condition directly. (2026-10-23, #9)
 
 ## Known flakes
 
@@ -24,3 +30,6 @@ Lessons from earlier fix passes in this repo. Newest last within each section. K
 
 - Cloud sessions: no authenticated `gh`; use the GitHub MCP tools.
 - Local golangci-lint may differ from CI's v2.6.2; CI is the authority.
+- Worktree sandbox: commands that `cd` to a computed path or chain steps with a heredoc are refused; use Write/Edit and one plain command per call. A refused call may have run an earlier part, so check `git status` before rerunning. (2026-10-23, #8)
+- `docs/events/v1/conformance.json` is hand-formatted: insert cases by text, since a `json.dump` round-trip rewrites ~1000 lines. To commit per finding when shared files mix both, copy them aside, strip the second finding's hunks, commit, then restore. (2026-10-23, #8)
+- MCP review threads: `resolve_review_thread` needs owner, repo and `threadId`; `add_reply_to_pull_request_comment` takes the numeric id from the `discussion_r…` URL. (2026-10-23, #8)
