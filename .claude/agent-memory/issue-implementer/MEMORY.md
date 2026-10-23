@@ -57,6 +57,6 @@ Lessons from implementing issues in this repo. Newest last within each section. 
 - Local golangci-lint may differ from CI's v2.6.2; CI is the authority. `.golangci.yml` lints the `e2e` build tag too.
 - CI runs twice per push to a PR branch (push and pull_request). A red run on one of them is a real failure until explained.
 - Worktree-isolated agents: compound shell commands that write files (heredocs, `mkdir` chains, `cd` to a computed path) are refused; use Write/Edit and one plain command per call. (2026-10-23, #6/#7)
-- OCPP 1.6 spec text and official JSON schemas (`docs/ocpp16/schemas/json/`) are reachable by sparse `git clone` of SAP/e-mobility-charging-stations-simulator; the GitHub API path is blocked. (2026-10-23, #6)
+- OCPP 1.6 spec text and official JSON schemas live in SAP/e-mobility-charging-stations-simulator under `docs/ocpp16/` (schemas in `docs/ocpp16/schemas/json/`). If fetching them is refused, report it; don't try another route. (2026-10-23, #6)
 - MCP `create_pull_request` replaces the PR body footer; re-read with `pull_request_read` and fix it with `update_pull_request`. (2026-10-23, #6)
 - Copying `.cache/bin/cpms-<sha>` from the main checkout into a worktree skips the simulator build in `make e2e`. (2026-10-23, #7)

@@ -17,7 +17,7 @@ Lessons from earlier fix passes in this repo. Newest last within each section. K
 - A fix to a race can introduce the next one (#4: moving `wg.Add` out of the lock). Re-read the diff for every lock and goroutine it touches.
 - When a review asks for prose rules (a README contract), make them testable: a machine-readable case file plus a test that ties every rule id in the README to at least one case. A test pinned to a README sentence makes a doc-only fix testable first. (2026-10-23, #8)
 - A mutation that only fails to compile, or an equivalent one, is not a catch: print the `--- FAIL` test names per mutation. For a rejection-only case, loosen the guard (e.g. `(?i)`); if another layer already rejects the input, say the case guards the documented rule. (2026-10-23, #8)
-- Go's `time.Parse` accepts offset minutes up to 99 (`+0260`); validate bounds yourself when a spec limits them. (2026-10-23, #8)
+- Go's `time.Parse` accepts offset hour 24 and minute 60 (`+24:00`, `+02:60`), one past each valid range, and rejects `+02:61` and `+25:00`; validate both bounds yourself when a spec limits them. (2026-10-23, #8)
 - A doc/test-only fix for a reordering finding can't be shown failing: force the reorder with a sink that holds an `Offer` and assert the order actually occurred. (2026-10-23, #9)
 - A closed flag checked before a non-blocking send races a concurrent `Close`: guard both (read lock in `Offer`, write lock in `Close`), test handled + dropped == offered, and pin the lock deterministically by holding the read lock in the test and detecting the queued writer with `TryRLock()` failing. No sleeps. (2026-10-23, #9)
 - staticcheck QF1006 flags `for { if cond { break } … }`; write the loop condition directly. (2026-10-23, #9)
