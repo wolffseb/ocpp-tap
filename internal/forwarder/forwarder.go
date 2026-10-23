@@ -137,6 +137,10 @@ type Forwarder struct {
 	sessions map[string]*session
 	closed   bool
 	wg       sync.WaitGroup
+
+	// beforeRegister, if set, runs just before a session is registered.
+	// Tests use it to force registrations out of order.
+	beforeRegister func(id string)
 }
 
 // New builds a Forwarder.
@@ -229,6 +233,9 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s := &session{id: id, down: down, up: up, writeTimeout: f.opts.WriteTimeout, done: make(chan struct{})}
+	if f.beforeRegister != nil {
+		f.beforeRegister(id)
+	}
 	if !f.register(s) {
 		s.close(websocket.CloseGoingAway, "octap shutting down", websocket.CloseGoingAway)
 		return

@@ -737,3 +737,55 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+// Two connections from the same charger whose registrations land out of
+// order (the first handshake's goroutine is descheduled between accepting
+// the charger and registering the session) must still leave the newer
+// connection in place and close the older one. CI hit this interleaving in
+// TestReconnectGetsNewUpstream; the hook makes it deterministic.
+func TestOlderConnectionRegisteringLateDoesNotReplaceNewer(t *testing.T) {
+	t.Parallel()
+
+	up := newUpstream(t, nil)
+	f, base, _ := start(t, Options{Chargers: chargers{"CP1": cp(up, "CP1", "")}})
+
+	secondRegistered := make(chan struct{})
+	var calls atomic.Int64
+	f.beforeRegister = func(string) {
+		switch calls.Add(1) {
+		case 1:
+			// Hold the first connection until the second has registered.
+			<-secondRegistered
+		case 2:
+			defer close(secondRegistered)
+		}
+	}
+
+	firstCh := make(chan *websocket.Conn, 1)
+	go func() {
+		ws, _, err := dial(t, base, "/ocpp/CP1", dialOpts{})
+		if err != nil {
+			t.Errorf("first dial: %v", err)
+		}
+		firstCh <- ws
+	}()
+	<-up.connections // the first charger is accepted, its registration held
+	waitFor(t, func() bool { return calls.Load() == 1 })
+
+	second := mustDial(t, base, "/ocpp/CP1", dialOpts{})
+	<-up.connections
+	first := <-firstCh
+	if first == nil {
+		t.FailNow()
+	}
+
+	// The older connection is the stale one, whatever order it registered in.
+	waitClosed(t, first, 2*time.Second)
+	if err := second.WriteMessage(websocket.TextMessage, []byte(`[2,"1","Heartbeat",{}]`)); err != nil {
+		t.Fatalf("newer connection unusable: %v", err)
+	}
+	if got := recv(t, up.received); string(got.data) != `[2,"1","Heartbeat",{}]` {
+		t.Errorf("upstream got %q", got.data)
+	}
+	waitFor(t, func() bool { return f.Active() == 1 })
+}
