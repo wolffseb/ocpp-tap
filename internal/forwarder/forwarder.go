@@ -29,6 +29,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -133,6 +134,10 @@ type Forwarder struct {
 	opts Options
 	log  *slog.Logger
 
+	// seq numbers handshakes in arrival order, so a reconnect is told apart
+	// from a stale connection however their goroutines are scheduled.
+	seq atomic.Uint64
+
 	mu       sync.Mutex
 	sessions map[string]*session
 	closed   bool
@@ -174,6 +179,7 @@ func (f *Forwarder) Close() {
 
 // ServeHTTP handles one charger's WebSocket handshake and then relays it.
 func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	seq := f.seq.Add(1)
 	id := chargerID(r.URL.Path)
 	log := f.log.With("charge_point", id, "remote", r.RemoteAddr)
 
@@ -232,16 +238,21 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s := &session{id: id, down: down, up: up, writeTimeout: f.opts.WriteTimeout, done: make(chan struct{})}
+	s := &session{id: id, seq: seq, down: down, up: up, writeTimeout: f.opts.WriteTimeout, done: make(chan struct{})}
 	if f.beforeRegister != nil {
 		f.beforeRegister(id)
 	}
-	if !f.register(s) {
-		s.close(websocket.CloseGoingAway, "octap shutting down", websocket.CloseGoingAway)
-		return
-	}
 	f.wg.Add(1)
 	defer f.wg.Done()
+	switch f.register(s) {
+	case shuttingDown:
+		s.close(websocket.CloseGoingAway, "octap shutting down", websocket.CloseGoingAway)
+		return
+	case superseded:
+		log.Info("charger connection superseded by a newer one before it started")
+		s.close(websocket.CloseNormalClosure, "replaced by a new connection", websocket.CloseNormalClosure)
+		return
+	}
 	defer f.unregister(s)
 
 	began := time.Now()
@@ -276,20 +287,37 @@ func (f *Forwarder) dialUpstream(ctx context.Context, cfg Charger, offered []str
 	return up, err
 }
 
-func (f *Forwarder) register(s *session) bool {
+// registration is the outcome of register.
+type registration int
+
+const (
+	registered registration = iota
+	// superseded: a newer connection from the same charger is already
+	// registered, so this one is stale.
+	superseded
+	shuttingDown
+)
+
+// register makes s the charger's current session, closing the one it
+// replaces. The newer handshake always wins, whichever registers first.
+func (f *Forwarder) register(s *session) registration {
 	f.mu.Lock()
 	if f.closed {
 		f.mu.Unlock()
-		return false
+		return shuttingDown
 	}
 	old := f.sessions[s.id]
+	if old != nil && old.seq > s.seq {
+		f.mu.Unlock()
+		return superseded
+	}
 	f.sessions[s.id] = s
 	f.mu.Unlock()
 	if old != nil {
 		// The charger reconnected; its previous connection is stale.
 		old.close(websocket.CloseNormalClosure, "replaced by a new connection", websocket.CloseNormalClosure)
 	}
-	return true
+	return registered
 }
 
 func (f *Forwarder) unregister(s *session) {
@@ -380,6 +408,7 @@ func (f *Forwarder) offer(fr Frame) {
 // session is one charger's pair of connections.
 type session struct {
 	id           string
+	seq          uint64
 	down, up     *websocket.Conn
 	writeTimeout time.Duration
 
