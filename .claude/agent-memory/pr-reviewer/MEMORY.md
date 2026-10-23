@@ -13,6 +13,7 @@ Lessons from earlier reviews in this repo. Newest last. Keep generalised; prune 
 - **OCPP fields whose meaning depends on another field** (2026-10-23, #8). BootNotification.conf `interval` is the heartbeat only when Accepted, otherwise the boot retry wait; MeterValues connector 0 is the main meter, usually `location = Inlet`. When a schema or decoder maps an OCPP field, read the field's full description in edition 2, not just its name.
 - **Contract rules that drop data silently** (2026-10-23, #8). "Values that don't fit make no event" plus a required field turns spec-legal input (OCPP 1.6 ed. 2 §3.15, normative: ISO 8601, receivers must handle offsets; §3.14 is only the informative UTC recommendation) into lost transactions. Ask what the rule does with every legal input shape.
 - **Parser boundary narrower than the documented one** (2026-10-23, #8). A rule saying "any ISO 8601" was backed by `time.Parse(RFC3339)` plus one fallback, so `+0200`/`+02` offsets (C `%z`, Java `Z`) silently dropped events. Feed a documented input grammar its edge forms in a scratch test, and cite the section number from the spec file, not memory.
+- **A regex in front of a library parser narrows it silently** (2026-10-23, #8). Putting a hand-written grammar regex in front of `time.Parse` to widen one form (offsets without a colon) dropped forms the library had accepted, e.g. a comma decimal sign (`09:15:00,5Z`, ISO 8601's preferred sign). Run the old and new parser side by side on the same edge inputs, and diff what each accepts.
 
 ## Checks that paid off
 
@@ -25,6 +26,7 @@ Lessons from earlier reviews in this repo. Newest last. Keep generalised; prune 
 - For a published schema or contract, mutate the schema itself (relax a pattern, drop a const or enum value) and check that a test fails for every rule the README states; tests often cover one field but not its sibling.
 - Prove a dependency is test-only with `go version -m` on the built binary and a no-op `go mod tidy`, not only `go list -deps`; and note when the binary doesn't import the package yet (the check is then vacuous).
 - Separate spec defaults from the project's own assumptions: OCPP 1.6 §7.43 gives a default unit only for energy (Wh); any W/A/Percent default is octap's choice and must be labelled so.
+- Sort surviving mutations of a guard (a regex, a range check) into two kinds. Equivalent ones are harmless: a later layer such as `time.Parse` still rejects the input. Real ones are a test gap, because the guard is the only thing enforcing a documented rule. Report only the real ones (2026-10-23, #8).
 - Pending GitHub review comments can't be edited through the MCP tools: draft each comment fully before adding it (`delete_pending` and redo otherwise).
 
 ## False alarms to avoid
