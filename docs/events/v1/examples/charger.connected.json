@@ -1,0 +1,12 @@
+{
+  "schema_version": "1",
+  "id": "01a1680a-d26b-7000-8000-000000000001",
+  "type": "charger.connected",
+  "charger_id": "CP1",
+  "connector_id": 0,
+  "timestamp": null,
+  "received_at": "2026-10-23T09:15:02.123456789Z",
+  "data": {
+    "subprotocol": "ocpp1.6"
+  }
+}

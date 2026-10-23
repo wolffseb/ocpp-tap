@@ -1,0 +1,17 @@
+{
+  "schema_version": "1",
+  "id": "01a1680a-d26b-7000-8000-000000000005",
+  "type": "meter.sample",
+  "charger_id": "CP1",
+  "connector_id": 1,
+  "timestamp": "2026-10-23T09:15:00Z",
+  "received_at": "2026-10-23T09:15:02.123456789Z",
+  "data": {
+    "transaction_id": 4711,
+    "energy_wh": 123456.5,
+    "power_w": 150000,
+    "current_a": 310.2,
+    "soc_percent": 57,
+    "context": "Sample.Periodic"
+  }
+}

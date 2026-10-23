@@ -27,6 +27,10 @@ octap run -config /data/config.json
 
 Point the charger at `ws://<octap-host>:9000/ocpp/CP1` (any path works; the identity is the last segment), with username `CP1` and the `password` above. Optional fields: `tls_cert_file` and `tls_key_file` (serve `wss://` to chargers), `upstream_ca_file` (extra CAs for `wss://` upstreams), `upstream_username` (default: the charger id). If the CPMS cannot be reached, octap refuses the charger, so it stays in its own offline mode.
 
+## Events
+
+The tap's events are versioned and published as JSON Schema in [`docs/events/v1/`](docs/events/v1/): connections, boots, connector status (the full OCPP 1.6 status), meter samples and transactions. The tap does not emit them yet.
+
 ## Development
 
 ```sh

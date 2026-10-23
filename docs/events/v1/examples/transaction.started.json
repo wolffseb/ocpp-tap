@@ -1,0 +1,16 @@
+{
+  "schema_version": "1",
+  "id": "01a1680a-d26b-7000-8000-000000000006",
+  "type": "transaction.started",
+  "charger_id": "CP1",
+  "connector_id": 1,
+  "timestamp": "2026-10-23T09:15:00Z",
+  "received_at": "2026-10-23T09:15:02.123456789Z",
+  "data": {
+    "transaction_id": 4711,
+    "id_tag": "04A1B2C3D4E5F6",
+    "meter_start_wh": 123000,
+    "reservation_id": 17,
+    "authorization_status": "Accepted"
+  }
+}

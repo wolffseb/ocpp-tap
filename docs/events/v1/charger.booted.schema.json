@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "charger.booted, v1",
+  "description": "A BootNotification and the CPMS's answer to it. BootNotification carries no timestamp, so timestamp is null.",
+  "$ref": "envelope.schema.json",
+  "properties": {
+    "type": { "const": "charger.booted" },
+    "connector_id": { "const": 0 },
+    "timestamp": { "const": null },
+    "data": { "$ref": "#/$defs/data" }
+  },
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "vendor": {
+          "description": "BootNotification.req chargePointVendor.",
+          "type": "string"
+        },
+        "model": {
+          "description": "BootNotification.req chargePointModel.",
+          "type": "string"
+        },
+        "serial_number": {
+          "description": "BootNotification.req chargePointSerialNumber, or null.",
+          "type": ["string", "null"]
+        },
+        "firmware_version": {
+          "description": "BootNotification.req firmwareVersion, or null.",
+          "type": ["string", "null"]
+        },
+        "registration_status": {
+          "description": "BootNotification.conf status (OCPP 1.6 RegistrationStatus).",
+          "enum": ["Accepted", "Pending", "Rejected"]
+        },
+        "heartbeat_interval_s": {
+          "description": "BootNotification.conf interval, in seconds.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": ["vendor", "model", "serial_number", "firmware_version", "registration_status", "heartbeat_interval_s"]
+    }
+  }
+}

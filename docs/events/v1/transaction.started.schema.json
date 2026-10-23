@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "transaction.started, v1",
+  "description": "A StartTransaction and the CPMS's answer to it. timestamp is StartTransaction.req timestamp.",
+  "$ref": "envelope.schema.json",
+  "properties": {
+    "type": { "const": "transaction.started" },
+    "connector_id": { "type": "integer" },
+    "timestamp": { "type": "string" },
+    "data": { "$ref": "#/$defs/data" }
+  },
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "transaction_id": {
+          "description": "StartTransaction.conf transactionId.",
+          "type": "integer"
+        },
+        "id_tag": {
+          "description": "StartTransaction.req idTag. Personal data: usually an RFID card UID. See README.md.",
+          "type": "string"
+        },
+        "meter_start_wh": {
+          "description": "StartTransaction.req meterStart, in Wh.",
+          "type": "integer"
+        },
+        "reservation_id": {
+          "description": "StartTransaction.req reservationId, or null.",
+          "type": ["integer", "null"]
+        },
+        "authorization_status": {
+          "description": "StartTransaction.conf idTagInfo.status (OCPP 1.6 AuthorizationStatus).",
+          "enum": ["Accepted", "Blocked", "Expired", "Invalid", "ConcurrentTx"]
+        }
+      },
+      "required": ["transaction_id", "id_tag", "meter_start_wh", "reservation_id", "authorization_status"]
+    }
+  }
+}

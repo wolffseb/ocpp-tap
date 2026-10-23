@@ -1,0 +1,17 @@
+{
+  "schema_version": "1",
+  "id": "01a1680a-d26b-7000-8000-000000000003",
+  "type": "charger.booted",
+  "charger_id": "CP1",
+  "connector_id": 0,
+  "timestamp": null,
+  "received_at": "2026-10-23T09:15:02.123456789Z",
+  "data": {
+    "vendor": "Kempower",
+    "model": "S-Series",
+    "serial_number": "KP-2026-000123",
+    "firmware_version": "1.42.0",
+    "registration_status": "Accepted",
+    "heartbeat_interval_s": 300
+  }
+}
