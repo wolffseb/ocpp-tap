@@ -10,6 +10,8 @@ Lessons from earlier reviews in this repo. Newest last. Keep generalised; prune 
 - **Test fixtures that never return** (2026-10-23). A fake WebSocket peer that waits on `r.Context()` hangs `httptest.Server.Close` (hijacked conns don't cancel it). Look for fixtures without a read loop or deadline.
 - **Port handoff in e2e** (2026-10-23, #4). Choosing a free port in the test and passing it to a subprocess races (a readiness probe can self-connect to the unbound port). The subprocess must bind `:0` and report its address.
 - **Semantic conflicts between PRs that are each green on their own** (carried over from headless-csms). When PRs touch the same behaviour, merge them in a scratch worktree and run `make ci` and `make e2e`.
+- **OCPP fields whose meaning depends on another field** (2026-10-23, #8). BootNotification.conf `interval` is the heartbeat only when Accepted, otherwise the boot retry wait; MeterValues connector 0 is the main meter, usually `location = Inlet`. When a schema or decoder maps an OCPP field, read the field's full description in edition 2, not just its name.
+- **Contract rules that drop data silently** (2026-10-23, #8). "Values that don't fit make no event" plus a required field turns spec-legal input (OCPP 1.6 §3.14: any ISO 8601 time, zone not mandated) into lost transactions. Ask what the rule does with every legal input shape.
 
 ## Checks that paid off
 
@@ -19,6 +21,9 @@ Lessons from earlier reviews in this repo. Newest last. Keep generalised; prune 
 - For the frame-identity check, make sure a mutating proxy still fails it (e2e `TestFrameCheckCatchesAlteration`); any change to `harness/frames`, `harness/recorder` or `assertIdentical` must keep that test meaningful.
 - For spec claims, quote the spec text (OCPP 1.6 transcriptions in SAP/e-mobility-charging-stations-simulator `docs/ocpp16/`). Verify third-party behaviour at the source.
 - Never run `git stash` in a scratch worktree: the stash ref is shared with the main repo.
+- For a published schema or contract, mutate the schema itself (relax a pattern, drop a const or enum value) and check that a test fails for every rule the README states; tests often cover one field but not its sibling.
+- Prove a dependency is test-only with `go version -m` on the built binary and a no-op `go mod tidy`, not only `go list -deps`; and note when the binary doesn't import the package yet (the check is then vacuous).
+- Pending GitHub review comments can't be edited through the MCP tools: draft each comment fully before adding it (`delete_pending` and redo otherwise).
 
 ## False alarms to avoid
 
