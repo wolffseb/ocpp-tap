@@ -229,7 +229,8 @@ func TestCloseHandlesWhatIsBuffered(t *testing.T) {
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
 	var handled atomic.Int64
-	tp := New(Options{Capacity: 8, Log: quiet(), Handler: func(forwarder.Frame) {
+	const buffered = 30
+	tp := New(Options{Capacity: 32, Log: quiet(), Handler: func(forwarder.Frame) {
 		select {
 		case entered <- struct{}{}:
 		default:
@@ -239,19 +240,22 @@ func TestCloseHandlesWhatIsBuffered(t *testing.T) {
 	}})
 	tp.Offer(msg("first"))
 	<-entered
-	for i := 0; i < 5; i++ {
+	for i := 0; i < buffered; i++ {
 		tp.Offer(msg("buffered"))
 	}
 	closed := make(chan struct{})
 	go func() { tp.Close(); close(closed) }()
+	// Release the handler only once Close has asked the consumer to stop,
+	// so the buffered frames are left to the drain.
+	<-tp.stop
 	close(release)
 	select {
 	case <-closed:
 	case <-time.After(3 * time.Second):
 		t.Fatal("Close did not return")
 	}
-	if n := handled.Load(); n != 6 {
-		t.Errorf("handled %d frames by Close, want 6", n)
+	if n := handled.Load(); n != 1+buffered {
+		t.Errorf("handled %d frames by Close, want %d", n, 1+buffered)
 	}
 }
 

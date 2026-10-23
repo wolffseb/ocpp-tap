@@ -783,6 +783,9 @@ func TestSinkSessionsDifferAcrossReconnect(t *testing.T) {
 	_, base, _ := start(t, Options{Chargers: chargers{"CP1": cp(up, "CP1", "")}, Sink: sink})
 	first := mustDial(t, base, "/ocpp/CP1", dialOpts{})
 	<-up.connections
+	// Let the first session start; a connection superseded before it
+	// registers never starts and gets no notices at all.
+	waitFor(t, func() bool { return len(sink.snapshot()) == 1 })
 	mustDial(t, base, "/ocpp/CP1", dialOpts{})
 	<-up.connections
 	waitClosed(t, first, 2*time.Second)
