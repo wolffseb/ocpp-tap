@@ -674,6 +674,17 @@ func (s *recordingSink) snapshot() []Frame {
 	return append([]Frame(nil), s.frames...)
 }
 
+// messages is the snapshot without connection lifecycle notices.
+func (s *recordingSink) messages() []Frame {
+	var out []Frame
+	for _, f := range s.snapshot() {
+		if f.Kind == Message {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 func TestSinkGetsACopyOfEveryFrame(t *testing.T) {
 	t.Parallel()
 
@@ -689,8 +700,8 @@ func TestSinkGetsACopyOfEveryFrame(t *testing.T) {
 	up.toSend <- message{websocket.TextMessage, []byte("down")}
 	readFrom(t, ws)
 
-	waitFor(t, func() bool { return len(sink.snapshot()) == 2 })
-	got := sink.snapshot()
+	waitFor(t, func() bool { return len(sink.messages()) == 2 })
+	got := sink.messages()
 	if got[0].ChargerID != "CP1" || got[0].Dir != Upstream || string(got[0].Data) != "up" || got[0].At.IsZero() {
 		t.Errorf("first frame = %+v", got[0])
 	}
@@ -722,8 +733,104 @@ func TestPanickingSinkDoesNotAffectForwarding(t *testing.T) {
 		up.toSend <- message{websocket.TextMessage, []byte("y")}
 		readFrom(t, ws)
 	}
-	if n := sink.calls.Load(); n != 6 {
-		t.Errorf("sink called %d times, want 6", n)
+	// One Connected notice, then six messages.
+	if n := sink.calls.Load(); n != 7 {
+		t.Errorf("sink called %d times, want 7", n)
+	}
+}
+
+// SP2: the sink learns when a charger connects and disconnects, so the tap
+// can emit charger.connected and charger.disconnected. Connected comes
+// before the session's first message and Disconnected after its last.
+func TestSinkGetsConnectionLifecycle(t *testing.T) {
+	t.Parallel()
+
+	up := newUpstream(t, nil)
+	sink := &recordingSink{}
+	f, base, _ := start(t, Options{Chargers: chargers{"CP1": cp(up, "CP1", "")}, Sink: sink})
+	ws := mustDial(t, base, "/ocpp/CP1", dialOpts{})
+	if err := ws.WriteMessage(websocket.TextMessage, []byte("up")); err != nil {
+		t.Fatal(err)
+	}
+	recv(t, up.received)
+	_ = ws.Close()
+	waitFor(t, func() bool { return f.Active() == 0 })
+	waitFor(t, func() bool { return len(sink.snapshot()) == 3 })
+
+	got := sink.snapshot()
+	if c := got[0]; c.Kind != Connected || c.ChargerID != "CP1" || c.Subprotocol != "ocpp1.6" || c.At.IsZero() || c.Data != nil {
+		t.Errorf("first notice = %+v, want Connected with subprotocol ocpp1.6", c)
+	}
+	if m := got[1]; m.Kind != Message || string(m.Data) != "up" {
+		t.Errorf("second = %+v, want the message", m)
+	}
+	if d := got[2]; d.Kind != Disconnected || d.ChargerID != "CP1" || d.Reason != "charger left" || d.At.IsZero() {
+		t.Errorf("last notice = %+v, want Disconnected with reason \"charger left\"", d)
+	}
+	if got[0].Session == 0 || got[1].Session != got[0].Session || got[2].Session != got[0].Session {
+		t.Errorf("sessions %d, %d, %d: want one non-zero session", got[0].Session, got[1].Session, got[2].Session)
+	}
+}
+
+// A reconnect is a new session. The replaced session's Disconnected can
+// arrive after the new session's Connected, so the session number is what
+// tells them apart.
+func TestSinkSessionsDifferAcrossReconnect(t *testing.T) {
+	t.Parallel()
+
+	up := newUpstream(t, nil)
+	sink := &recordingSink{}
+	_, base, _ := start(t, Options{Chargers: chargers{"CP1": cp(up, "CP1", "")}, Sink: sink})
+	first := mustDial(t, base, "/ocpp/CP1", dialOpts{})
+	<-up.connections
+	mustDial(t, base, "/ocpp/CP1", dialOpts{})
+	<-up.connections
+	waitClosed(t, first, 2*time.Second)
+	waitFor(t, func() bool { return len(sink.snapshot()) == 3 })
+
+	var connected []uint64
+	var disconnected []Frame
+	for _, fr := range sink.snapshot() {
+		switch fr.Kind {
+		case Connected:
+			connected = append(connected, fr.Session)
+		case Disconnected:
+			disconnected = append(disconnected, fr)
+		}
+	}
+	if len(connected) != 2 || connected[0] == connected[1] {
+		t.Fatalf("Connected sessions %v, want two different ones", connected)
+	}
+	if len(disconnected) != 1 || disconnected[0].Session != min(connected[0], connected[1]) ||
+		disconnected[0].Reason != "replaced by a new connection" {
+		t.Errorf("Disconnected %+v, want the older session replaced", disconnected)
+	}
+}
+
+// Upstream lost: the Disconnected notice says so.
+func TestSinkDisconnectReasonUpstreamLost(t *testing.T) {
+	t.Parallel()
+
+	up := newUpstream(t, nil)
+	sink := &recordingSink{}
+	_, base, _ := start(t, Options{Chargers: chargers{"CP1": cp(up, "CP1", "")}, Sink: sink})
+	ws := mustDial(t, base, "/ocpp/CP1", dialOpts{})
+	<-up.connections
+	up.toSend <- message{} // upstream closes
+	waitClosed(t, ws, 2*time.Second)
+	waitFor(t, func() bool { return len(sink.snapshot()) == 2 })
+	if d := sink.snapshot()[1]; d.Kind != Disconnected || d.Reason != "upstream lost" {
+		t.Errorf("notice = %+v, want Disconnected with reason \"upstream lost\"", d)
+	}
+}
+
+func TestKindString(t *testing.T) {
+	t.Parallel()
+
+	for k, want := range map[Kind]string{Message: "message", Connected: "connected", Disconnected: "disconnected", Kind(9): "Kind(9)"} {
+		if got := k.String(); got != want {
+			t.Errorf("Kind(%d).String() = %q, want %q", int(k), got, want)
+		}
 	}
 }
 
