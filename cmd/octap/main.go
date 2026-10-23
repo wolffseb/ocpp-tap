@@ -1,5 +1,6 @@
 // Command octap is the ocpp-tap binary: an OCPP 1.6-J forwarder with a
-// read-only tap (the tap arrives with SP2; see docs/PRD.md).
+// read-only tap. The tap only counts and debug-logs frames so far; events
+// come later in SP2 (docs/PRD.md).
 //
 //	octap run -config /data/config.json [-listen :9000]
 //	octap version
@@ -18,11 +19,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/wolffseb/ocpp-tap/internal/config"
 	"github.com/wolffseb/ocpp-tap/internal/forwarder"
+	"github.com/wolffseb/ocpp-tap/internal/tap"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -112,7 +115,18 @@ func serve(ctx context.Context, ln net.Listener, cfg *config.Config, log *slog.L
 		}
 	}
 
-	fwd := forwarder.New(forwarder.Options{Chargers: cfg, UpstreamTLS: upstreamTLS, Log: log})
+	var tapped atomic.Uint64
+	tp := tap.New(tap.Options{Log: log, Handler: func(f forwarder.Frame) {
+		tapped.Add(1)
+		logTapFrame(log, f)
+	}})
+	// The tap stops after the forwarder, so it sees the disconnects.
+	defer func() {
+		tp.Close()
+		log.Info("tap stopped", "frames", tapped.Load(), "dropped", tp.Dropped(), "panics", tp.Panics())
+	}()
+
+	fwd := forwarder.New(forwarder.Options{Chargers: cfg, Sink: tp, UpstreamTLS: upstreamTLS, Log: log})
 	srv := &http.Server{
 		Handler:           fwd,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -152,6 +166,22 @@ func serve(ctx context.Context, ln net.Listener, cfg *config.Config, log *slog.L
 		return err
 	}
 	return nil
+}
+
+// logTapFrame is the tap's handler until frames become events: one debug
+// line per frame, never the payload, which can hold idTags.
+func logTapFrame(log *slog.Logger, f forwarder.Frame) {
+	if !log.Enabled(context.Background(), slog.LevelDebug) {
+		return
+	}
+	switch f.Kind {
+	case forwarder.Message:
+		log.Debug("tap frame", "kind", f.Kind, "charge_point", f.ChargerID, "dir", f.Dir, "size", len(f.Data), "session", f.Session)
+	case forwarder.Connected:
+		log.Debug("tap frame", "kind", f.Kind, "charge_point", f.ChargerID, "subprotocol", f.Subprotocol, "session", f.Session)
+	default:
+		log.Debug("tap frame", "kind", f.Kind, "charge_point", f.ChargerID, "reason", f.Reason, "session", f.Session)
+	}
 }
 
 // upstreamTLSConfig trusts the system roots plus the certificates in caFile.
