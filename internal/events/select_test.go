@@ -7,8 +7,22 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 )
+
+// TestREADMELabelsUnitAssumption: OCPP 1.6 §7.43 defaults the unit only for
+// energy, so the W, A and Percent defaults are octap's own and the README must
+// say so rather than attribute them to the spec.
+func TestREADMELabelsUnitAssumption(t *testing.T) {
+	readme, err := os.ReadFile(filepath.Join(schemaDir, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(readme), "octap's own assumption") {
+		t.Error("README M2 doesn't label the W, A and Percent default units as octap's own assumption")
+	}
+}
 
 type conformance struct {
 	MeterSamples []struct {

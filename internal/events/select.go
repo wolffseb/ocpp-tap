@@ -28,7 +28,9 @@ type SampledValue struct {
 }
 
 type measurandSpec struct {
-	name        string
+	name string
+	// defaultUnit applies when a value has no unit. OCPP 1.6 §7.43 defines it
+	// for energy only; for W, A and Percent it is octap's own assumption (M2).
 	defaultUnit string
 	// units maps each accepted unit to its factor to the base unit.
 	units map[string]float64
