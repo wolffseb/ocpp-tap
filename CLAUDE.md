@@ -26,7 +26,11 @@ Non-goals: no CSMS logic, no commands to chargers, no smart charging or load man
 6. Every PR description lists which acceptance criteria it moves from red to green.
 7. Real chargers, real CPMS credentials, and network access outside the harness are off limits for agents.
 
-One PR per subproject. Run `make ci` before every push.
+Every PR is scoped to one subproject (a subproject usually takes several PRs, one per issue). Run `make ci` before every push.
+
+## Agent team
+
+The main session orchestrates; `.claude/agents/` holds `issue-implementer`, `pr-reviewer` and `pr-fixer`, each with lessons in `.claude/agent-memory/<agent>/MEMORY.md`. The flow (issue → implement → review → fix → merge), the PR body, and how memory is committed are in [`docs/working-agreement.md`](docs/working-agreement.md). Who may merge a PR is decided by its light in [`docs/merge-risk.md`](docs/merge-risk.md): the orchestrator merges only 🟢.
 
 ## Automated gate (every PR)
 
@@ -66,3 +70,5 @@ Owner, license (no `LICENSE` file until decided), UI library access, branding, t
 | `harness/` | SP0 test harness; never ships in the image |
 | `e2e/` | end-to-end suite behind `make e2e` |
 | `docs/adr/` | architecture decision records |
+| `docs/working-agreement.md`, `docs/merge-risk.md` | agent team process and merge rules |
+| `.claude/agents/`, `.claude/agent-memory/` | agent definitions and their lessons |
