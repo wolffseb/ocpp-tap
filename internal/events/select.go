@@ -194,12 +194,13 @@ func ParseFrameTime(s string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("events: %q is not an OCPP timestamp (ISO 8601 extended date and time, see README rule T1)", s)
 	}
 	// No designator reads as UTC, so it parses like Z. An offset is rewritten
-	// to the +hh:mm form time.Parse takes; its minutes must be 00-59.
+	// to the +hh:mm form time.Parse takes; its hours must be 00-23 and its minutes 00-59.
 	zone := "Z"
 	if m[2] != "" {
+		// time.Parse accepts hour 24 and minute 60 in an offset; T1 does not.
 		mm := cmp.Or(m[3], "00")
-		if mm > "59" {
-			return time.Time{}, fmt.Errorf("events: %q has an offset with minutes out of range", s)
+		if m[2][1:] > "23" || mm > "59" {
+			return time.Time{}, fmt.Errorf("events: %q has an offset out of range (hours 00-23, minutes 00-59)", s)
 		}
 		zone = m[2] + ":" + mm
 	}

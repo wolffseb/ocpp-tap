@@ -108,7 +108,7 @@ StopTransaction has no connector id, so `connector_id` is the one from the match
   YYYY-MM-DD "T" hh:mm:ss [ ( "." | "," ) digits ] [ "Z" | ("+" | "-") hh [ [":"] mm ] ]
   ```
 
-  That is, the fraction may start with `.` or `,` (ISO 8601 allows both), and the offset may be `Z`, `+hh:mm`, `+hhmm` or `+hh` (the same with `-`), with minutes 00-59. A time with an offset is converted to UTC. A time **with no zone designator** (`2026-10-23T09:15:00`) is read as UTC, the zone §3.14 recommends, so the event is kept and `timestamp` is never `null` for `meter.sample` and `transaction.*`. A charger that sends local time without a zone therefore reports a shifted `timestamp`; `received_at` is the reference for that. Anything outside the grammar makes no event: a date alone, basic format (`20261023T091500Z`), a space for `T`, a one-digit offset (`+2`), lower-case `t` or `z`. Tested by `events.ParseFrameTime`.
+  That is, the fraction may start with `.` or `,` (ISO 8601 allows both), and the offset may be `Z`, `+hh:mm`, `+hhmm` or `+hh` (the same with `-`), with hours 00-23 and minutes 00-59 (`+24:00` is rejected; there is no further cap on the offset). A time with an offset is converted to UTC. A time **with no zone designator** (`2026-10-23T09:15:00`) is read as UTC, the zone §3.14 recommends, so the event is kept and `timestamp` is never `null` for `meter.sample` and `transaction.*`. A charger that sends local time without a zone therefore reports a shifted `timestamp`; `received_at` is the reference for that. Anything outside the grammar makes no event: a date alone, basic format (`20261023T091500Z`), a space for `T`, a one-digit offset (`+2`), lower-case `t` or `z`. Tested by `events.ParseFrameTime`.
 
 ## Null rules
 
