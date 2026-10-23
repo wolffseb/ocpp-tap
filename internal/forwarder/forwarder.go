@@ -242,8 +242,6 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if f.beforeRegister != nil {
 		f.beforeRegister(id)
 	}
-	f.wg.Add(1)
-	defer f.wg.Done()
 	switch f.register(s) {
 	case shuttingDown:
 		s.close(websocket.CloseGoingAway, "octap shutting down", websocket.CloseGoingAway)
@@ -253,6 +251,7 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.close(websocket.CloseNormalClosure, "replaced by a new connection", websocket.CloseNormalClosure)
 		return
 	}
+	defer f.wg.Done()
 	defer f.unregister(s)
 
 	began := time.Now()
@@ -300,6 +299,10 @@ const (
 
 // register makes s the charger's current session, closing the one it
 // replaces. The newer handshake always wins, whichever registers first.
+//
+// A registered session is counted in f.wg under the same lock that checks
+// f.closed, so Close's Wait never runs concurrently with an Add; the caller
+// calls f.wg.Done when the session ends.
 func (f *Forwarder) register(s *session) registration {
 	f.mu.Lock()
 	if f.closed {
@@ -312,6 +315,7 @@ func (f *Forwarder) register(s *session) registration {
 		return superseded
 	}
 	f.sessions[s.id] = s
+	f.wg.Add(1)
 	f.mu.Unlock()
 	if old != nil {
 		// The charger reconnected; its previous connection is stale.
