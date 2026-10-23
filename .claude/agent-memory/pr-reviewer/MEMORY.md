@@ -33,6 +33,8 @@ Lessons from earlier reviews in this repo. Newest last. Keep generalised; prune 
 - To find what a relative latency gate (phase A vs. phase B) can detect, mutate the hot path with a busy-wait of N µs, not a timer: Go timers round sub-ms waits up to ~1 ms and overstate sensitivity. Also try a cost paid in both phases; a relative check can't see it by construction.
 - Running one e2e test outside `make e2e` needs `make harness-deps build` in the worktree plus `E2E_SIMULATOR`/`E2E_PROXY` set (see the Makefile `e2e` target); without them the package fails in milliseconds and looks like a mutation result.
 - A race test with many goroutines rarely hits a nanosecond check-then-act window. To see whether a lock is pinned, swap it for the lock-free variant with and without `runtime.Gosched()` in the window: if only the Gosched version fails, the test doesn't cover the lock; ask for a deterministic test that holds the lock itself (2026-10-23, #9).
+- Memory-sync PRs: check every factual claim about Go/library behaviour with a scratch run, since agent reports carry wrong numbers (a `time.Parse` bound was off). Also flag any lesson of the form "X is blocked, use Y": that is a sandbox workaround even when it sounds like a tip (2026-10-23, #10).
+- Go `time.Parse` accepts zone offset hour 24 and minute 60 (`+24:00`, `+02:60`), one past each valid range. A guard that checks only minutes still lets `+24:mm` through (2026-10-23, #10).
 
 ## False alarms to avoid
 
