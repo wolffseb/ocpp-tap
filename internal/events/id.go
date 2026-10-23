@@ -19,7 +19,9 @@ var ids struct {
 // process sort, as strings, in the order NewID returned them.
 func NewID() string {
 	var b [16]byte
-	rand.Read(b[:]) // never fails (crypto/rand, Go 1.24)
+	// Since Go 1.24, crypto/rand.Read never returns an error; it crashes
+	// the program if the system's randomness fails.
+	_, _ = rand.Read(b[:])
 
 	now := time.Now().UnixMilli()
 	ids.Lock()
