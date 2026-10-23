@@ -216,8 +216,36 @@ func TestCloseStopsTheConsumer(t *testing.T) {
 	if n := handled.Load(); n != 1 {
 		t.Errorf("handler called %d times, want 1 (nothing after Close)", n)
 	}
-	if n := tp.Dropped(); n != 100-8 {
-		t.Errorf("Dropped = %d after Close, want %d", n, 100-8)
+	// Every late frame is counted: none is buffered unseen.
+	if n := tp.Dropped(); n != 100 {
+		t.Errorf("Dropped = %d after Close, want 100", n)
+	}
+}
+
+// Offers racing Close lose nothing unseen: every frame is either handled or
+// counted as dropped.
+func TestOffersRacingCloseAreHandledOrCounted(t *testing.T) {
+	t.Parallel()
+
+	var handled atomic.Int64
+	tp := New(Options{Capacity: 16, Log: quiet(), Handler: func(forwarder.Frame) { handled.Add(1) }})
+
+	const offerers, each = 8, 500
+	var wg sync.WaitGroup
+	for i := 0; i < offerers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < each; j++ {
+				tp.Offer(msg("x"))
+			}
+		}()
+	}
+	tp.Close()
+	wg.Wait()
+
+	if got := uint64(handled.Load()) + tp.Dropped(); got != offerers*each {
+		t.Errorf("handled %d + dropped %d = %d, want %d", handled.Load(), tp.Dropped(), got, offerers*each)
 	}
 }
 

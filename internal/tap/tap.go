@@ -38,6 +38,12 @@ type Tap struct {
 	dropped atomic.Uint64
 	panics  atomic.Uint64
 
+	// mu orders Offer against Close: Offer holds the read lock for its one
+	// non-blocking send, Close takes the write lock to set closed. So a frame
+	// is either buffered before Close starts draining, or counted as dropped.
+	mu     sync.RWMutex
+	closed bool
+
 	stop      chan struct{}
 	done      chan struct{}
 	closeOnce sync.Once
@@ -66,8 +72,15 @@ func New(opts Options) *Tap {
 }
 
 // Offer implements forwarder.FrameSink. It costs the forwarder one select,
-// never a wait.
+// never a wait. After Close it counts the frame as dropped and buffers
+// nothing.
 func (t *Tap) Offer(f forwarder.Frame) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if t.closed {
+		t.dropped.Add(1)
+		return
+	}
 	select {
 	case t.frames <- f:
 	default:
@@ -75,8 +88,8 @@ func (t *Tap) Offer(f forwarder.Frame) {
 	}
 }
 
-// Dropped is how many frames were dropped because the buffer was full: the
-// tap_events_dropped counter.
+// Dropped is how many frames were dropped, because the buffer was full or
+// because they were offered after Close: the tap_events_dropped counter.
 func (t *Tap) Dropped() uint64 { return t.dropped.Load() }
 
 // Panics is how many times the handler panicked.
@@ -86,7 +99,12 @@ func (t *Tap) Panics() uint64 { return t.panics.Load() }
 // consumer and waits for it. Frames offered afterwards are dropped. Close
 // waits for the handler, so a handler that never returns blocks it.
 func (t *Tap) Close() {
-	t.closeOnce.Do(func() { close(t.stop) })
+	t.closeOnce.Do(func() {
+		t.mu.Lock()
+		t.closed = true
+		t.mu.Unlock()
+		close(t.stop)
+	})
 	<-t.done
 }
 
