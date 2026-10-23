@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -246,6 +247,62 @@ func TestOffersRacingCloseAreHandledOrCounted(t *testing.T) {
 
 	if got := uint64(handled.Load()) + tp.Dropped(); got != offerers*each {
 		t.Errorf("handled %d + dropped %d = %d, want %d", handled.Load(), tp.Dropped(), got, offerers*each)
+	}
+}
+
+// Close waits for an Offer that is already past its closed check. The test
+// holds the read lock the way an in-flight Offer does, waits until Close is
+// queued for the write lock, then finishes that Offer's send. The frame must
+// reach the handler: a lock-free closed flag would let Close finish draining
+// first and the late send would sit in the buffer unseen and uncounted.
+func TestCloseWaitsForInFlightOffer(t *testing.T) {
+	t.Parallel()
+
+	var handled atomic.Int64
+	tp := New(Options{Capacity: 4, Log: quiet(), Handler: func(forwarder.Frame) { handled.Add(1) }})
+
+	// An in-flight Offer: past the closed check, not yet sent.
+	tp.mu.RLock()
+	if tp.closed {
+		tp.mu.RUnlock()
+		t.Fatal("tap closed before Close was called")
+	}
+
+	closed := make(chan struct{})
+	go func() { tp.Close(); close(closed) }()
+
+	// A pending writer blocks new readers, so TryRLock failing means Close
+	// is queued on the lock. Poll with a deadline, no sleeps.
+	deadline := time.Now().Add(3 * time.Second)
+	for tp.mu.TryRLock() {
+		tp.mu.RUnlock()
+		if time.Now().After(deadline) {
+			tp.mu.RUnlock() // the in-flight Offer's lock
+			t.Fatal("Close did not wait for the in-flight Offer")
+		}
+		runtime.Gosched()
+	}
+	select {
+	case <-closed:
+		t.Fatal("Close returned while an Offer was in flight")
+	default:
+	}
+
+	// The in-flight Offer finishes its send, then releases the lock.
+	select {
+	case tp.frames <- msg("in-flight"):
+	default:
+		t.Fatal("buffer unexpectedly full")
+	}
+	tp.mu.RUnlock()
+
+	select {
+	case <-closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close did not return")
+	}
+	if n := handled.Load(); n != 1 || tp.Dropped() != 0 {
+		t.Errorf("handled %d, dropped %d, want the in-flight frame handled once", n, tp.Dropped())
 	}
 }
 
