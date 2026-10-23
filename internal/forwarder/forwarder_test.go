@@ -789,3 +789,34 @@ func TestOlderConnectionRegisteringLateDoesNotReplaceNewer(t *testing.T) {
 	}
 	waitFor(t, func() bool { return f.Active() == 1 })
 }
+
+// Close racing new handshakes must neither race nor leave a session behind:
+// a charger accepted after Close begins is closed, not registered.
+func TestCloseRacingNewConnections(t *testing.T) {
+	t.Parallel()
+
+	up := newUpstream(t, nil)
+	f, base, _ := start(t, Options{Chargers: chargers{"CP1": cp(up, "CP1", "")}})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d := websocket.Dialer{Subprotocols: []string{"ocpp1.6"}, HandshakeTimeout: 3 * time.Second}
+			ws, resp, err := d.Dial(base+"/ocpp/CP1", nil)
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+			if err == nil {
+				_ = ws.Close()
+			}
+		}()
+	}
+	time.Sleep(time.Millisecond)
+	f.Close()
+	wg.Wait()
+	if n := f.Active(); n != 0 {
+		t.Errorf("Active = %d after Close", n)
+	}
+}
