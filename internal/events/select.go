@@ -1,7 +1,10 @@
 package events
 
 import (
+	"cmp"
+	"fmt"
 	"math"
+	"regexp"
 	"slices"
 	"strconv"
 	"time"
@@ -170,17 +173,35 @@ func selectValue(connectorID int, values []SampledValue, spec measurandSpec) (*f
 	return &total, used
 }
 
+// frameTime is the grammar of README rule T1: an ISO 8601 extended date and
+// time, optional fractional seconds, and an optional zone designator (Z or
+// an offset of the form +hh:mm, +hhmm or +hh).
+var frameTime = regexp.MustCompile(
+	`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?)(?:Z|([+-]\d{2})(?::?(\d{2}))?)?$`)
+
 // ParseFrameTime reads an OCPP timestamp (README rule T1). A time with a zone
-// designator (Z or an offset) is converted to UTC. OCPP 1.6 allows a time
-// without one; it is read as UTC, the zone the spec recommends, so the event
-// is kept. Anything that is not an ISO 8601 date and time is an error.
+// designator (Z or an offset, with or without a colon) is converted to UTC.
+// OCPP 1.6 §3.15 requires receivers to handle offsets, and allows a time
+// without a zone designator; that is read as UTC, the zone §3.14 recommends,
+// so the event is kept. Anything outside the T1 grammar is an error.
 func ParseFrameTime(s string) (time.Time, error) {
-	t, err := time.Parse(time.RFC3339Nano, s)
-	if err != nil {
-		var err2 error
-		if t, err2 = time.ParseInLocation("2006-01-02T15:04:05", s, time.UTC); err2 != nil {
-			return time.Time{}, err
+	m := frameTime.FindStringSubmatch(s)
+	if m == nil {
+		return time.Time{}, fmt.Errorf("events: %q is not an OCPP timestamp (ISO 8601 extended date and time, see README rule T1)", s)
+	}
+	// No designator reads as UTC, so it parses like Z. An offset is rewritten
+	// to the +hh:mm form time.Parse takes; its minutes must be 00-59.
+	zone := "Z"
+	if m[2] != "" {
+		mm := cmp.Or(m[3], "00")
+		if mm > "59" {
+			return time.Time{}, fmt.Errorf("events: %q has an offset with minutes out of range", s)
 		}
+		zone = m[2] + ":" + mm
+	}
+	t, err := time.Parse(time.RFC3339Nano, m[1]+zone)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("events: %q is not an OCPP timestamp: %w", s, err)
 	}
 	return t.UTC(), nil
 }

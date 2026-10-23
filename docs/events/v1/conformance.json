@@ -167,9 +167,18 @@
     {"name": "offset is converted", "rules": ["T1"], "input": "2026-10-23T11:15:00+02:00", "expect": "2026-10-23T09:15:00Z"},
     {"name": "no zone is UTC", "rules": ["T1"], "input": "2026-10-23T09:15:00", "expect": "2026-10-23T09:15:00Z"},
     {"name": "no zone, with fraction", "rules": ["T1"], "input": "2026-10-23T09:15:00.250", "expect": "2026-10-23T09:15:00.25Z"},
+    {"name": "offset without a colon", "rules": ["T1"], "input": "2026-10-23T11:15:00+0200", "expect": "2026-10-23T09:15:00Z"},
+    {"name": "offset of hours only", "rules": ["T1"], "input": "2026-10-23T11:15:00+02", "expect": "2026-10-23T09:15:00Z"},
+    {"name": "negative offset without a colon", "rules": ["T1"], "input": "2026-10-23T04:45:00-0430", "expect": "2026-10-23T09:15:00Z"},
+    {"name": "fraction and a zero offset without a colon", "rules": ["T1"], "input": "2026-10-23T09:15:00.000+0000", "expect": "2026-10-23T09:15:00Z"},
+    {"name": "fraction and offset with a colon", "rules": ["T1"], "input": "2026-10-23T11:15:00.5+02:00", "expect": "2026-10-23T09:15:00.5Z"},
     {"name": "fraction and Z", "rules": ["T1"], "input": "2026-10-23T09:15:00.123456789Z", "expect": "2026-10-23T09:15:00.123456789Z"},
     {"name": "a date only is not a timestamp", "rules": ["T1"], "input": "2026-10-23", "expect": null},
     {"name": "text is not a timestamp", "rules": ["T1"], "input": "yesterday", "expect": null},
-    {"name": "empty is not a timestamp", "rules": ["T1"], "input": "", "expect": null}
+    {"name": "empty is not a timestamp", "rules": ["T1"], "input": "", "expect": null},
+    {"name": "a one-digit offset is not a timestamp", "rules": ["T1"], "input": "2026-10-23T11:15:00+2", "expect": null},
+    {"name": "an offset with minutes out of range is not a timestamp", "rules": ["T1"], "input": "2026-10-23T11:15:00+0260", "expect": null},
+    {"name": "basic format is not a timestamp", "rules": ["T1"], "input": "20261023T091500Z", "expect": null},
+    {"name": "a space instead of T is not a timestamp", "rules": ["T1"], "input": "2026-10-23 09:15:00Z", "expect": null}
   ]
 }

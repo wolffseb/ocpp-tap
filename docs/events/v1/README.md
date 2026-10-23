@@ -102,7 +102,13 @@ StopTransaction has no connector id, so `connector_id` is the one from the match
 
 ## Timestamps in frames
 
-- **T1** OCPP 1.6 §3.14 allows any ISO 8601 time and recommends UTC. A frame time with a `Z` or an offset is converted to UTC. A time **with no zone designator** (`2026-10-23T09:15:00`) is read as UTC, the zone the spec recommends, so the event is kept and `timestamp` is never `null` for `meter.sample` and `transaction.*`. A charger that sends local time without a zone therefore reports a shifted `timestamp`; `received_at` is the reference for that. A value that is not an ISO 8601 date and time makes no event. Tested by `events.ParseFrameTime`.
+- **T1** OCPP 1.6 §3.15 (normative) requires implementations to use ISO 8601 and receivers to handle fractional seconds and time zone offsets; §3.14 (informative) recommends UTC. octap accepts exactly this grammar, a subset of ISO 8601 (extended format only):
+
+  ```
+  YYYY-MM-DD "T" hh:mm:ss [ "." digits ] [ "Z" | ("+" | "-") hh [ [":"] mm ] ]
+  ```
+
+  That is, the offset may be `Z`, `+hh:mm`, `+hhmm` or `+hh` (the same with `-`), with minutes 00-59. A time with an offset is converted to UTC. A time **with no zone designator** (`2026-10-23T09:15:00`) is read as UTC, the zone §3.14 recommends, so the event is kept and `timestamp` is never `null` for `meter.sample` and `transaction.*`. A charger that sends local time without a zone therefore reports a shifted `timestamp`; `received_at` is the reference for that. Anything outside the grammar makes no event: a date alone, basic format (`20261023T091500Z`), a space for `T`, a one-digit offset (`+2`), lower-case `t` or `z`. Tested by `events.ParseFrameTime`.
 
 ## Null rules
 
